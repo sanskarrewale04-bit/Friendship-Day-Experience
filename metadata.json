@@ -1,0 +1,6 @@
+{
+  "name": "Friendship Day Experience",
+  "description": "An immersive, cinematic, emotional storytelling experience where users create custom greetings, recipient animated stories, and sign a digital Friendship Agreement with certificate.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
