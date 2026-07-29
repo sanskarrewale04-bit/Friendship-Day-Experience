@@ -408,7 +408,8 @@ app.get('/api/audio/:fileId', (req, res) => {
 // Verify admin passcode
 app.post('/api/admin/verify-passcode', (req, res) => {
   const { passcode } = req.body;
-  if (passcode === '0920') {
+  const adminPassword = process.env.ADMIN_PASSWORD || '0920';
+  if (passcode === adminPassword) {
     return res.json({ success: true });
   }
   return res.status(401).json({ success: false, error: 'Incorrect Passcode. Access Denied.' });
