@@ -4,6 +4,7 @@ import { Award, Download, Share2, Sparkles, Heart, PlusCircle, CheckCircle2, Loa
 import { safeHtml2Canvas } from '../utils/safeHtml2canvas';
 import QRCode from 'qrcode';
 import { HiddenAdminAccess } from './HiddenAdminAccess';
+import { ShareModal } from './ShareModal';
 
 interface CertificateViewProps {
   card: FriendshipCard;
@@ -15,6 +16,7 @@ export const CertificateView: React.FC<CertificateViewProps> = ({ card, onCreate
   const certRef = useRef<HTMLDivElement | null>(null);
   const [qrUrl, setQrUrl] = useState<string>('');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   useEffect(() => {
     const generateQr = async () => {
@@ -124,7 +126,7 @@ export const CertificateView: React.FC<CertificateViewProps> = ({ card, onCreate
         <button
           onClick={handleDownloadPNG}
           disabled={isDownloading}
-          className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold py-3.5 px-6 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
+          className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold py-3.5 px-5 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
         >
           {isDownloading ? (
             <>
@@ -138,19 +140,33 @@ export const CertificateView: React.FC<CertificateViewProps> = ({ card, onCreate
         </button>
 
         <button
+          onClick={() => setIsShareModalOpen(true)}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-5 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
+        >
+          <Share2 className="w-4 h-4" /> Share Card
+        </button>
+
+        <button
           onClick={handlePrint}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3.5 px-6 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
+          className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
         >
           <Printer className="w-4 h-4" /> Print
         </button>
 
         <button
           onClick={onCreateOwn}
-          className="flex-1 bg-gradient-to-r from-rose-500 to-purple-600 hover:opacity-95 text-white font-bold py-3.5 px-6 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
+          className="flex-1 bg-gradient-to-r from-rose-500 to-purple-600 hover:opacity-95 text-white font-bold py-3.5 px-5 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer"
         >
-          <PlusCircle className="w-4 h-4" /> Create Your Own Greeting
+          <PlusCircle className="w-4 h-4" /> Create Your Own
         </button>
       </div>
+
+      {/* Share Modal */}
+      <ShareModal
+        card={card}
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+      />
 
       {/* Hidden Admin Access Watermark in Bottom Right Corner */}
       {onUnlockAdmin && (

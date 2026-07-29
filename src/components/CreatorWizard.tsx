@@ -735,7 +735,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
           )}
 
           {/* Quick Social Share Buttons */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="grid grid-cols-2 gap-2.5 mb-6">
             <a
               href={`https://wa.me/?text=${encodeURIComponent(`Hey ${createdCard.friendName}! I made an interactive Friendship Experience for you. Open it here: ${window.location.origin}/card/${createdCard.id}`)}`}
               target="_blank"
@@ -747,13 +747,13 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
                   body: JSON.stringify({ channel: 'whatsapp' })
                 }).catch(() => {});
               }}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" /> WhatsApp
             </a>
 
             <a
-              href={`https://t.me/share/url?url=${encodeURIComponent(`${window.location.origin}/card/${createdCard.id}`)}&text=${encodeURIComponent(`Check out this Friendship Experience!`)}`}
+              href={`https://t.me/share/url?url=${encodeURIComponent(`${window.location.origin}/card/${createdCard.id}`)}&text=${encodeURIComponent(`Check out this Friendship Experience for ${createdCard.friendName}!`)}`}
               target="_blank"
               rel="noreferrer"
               onClick={() => {
@@ -763,10 +763,36 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
                   body: JSON.stringify({ channel: 'telegram' })
                 }).catch(() => {});
               }}
-              className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors"
+              className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" /> Telegram
             </a>
+
+            <a
+              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(`${window.location.origin}/card/${createdCard.id}`)}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => {
+                fetch(`/api/cards/${createdCard.id}/share`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ channel: 'facebook' })
+                }).catch(() => {});
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" /> Facebook
+            </a>
+
+            <button
+              onClick={() => {
+                copyShareLink();
+                alert('Card link copied! You can now paste it directly into Instagram Story or DM.');
+              }}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" /> Instagram
+            </button>
           </div>
 
           <button

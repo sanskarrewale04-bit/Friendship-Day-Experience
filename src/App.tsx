@@ -5,12 +5,14 @@ import { CreatorWizard } from './components/CreatorWizard';
 import { InteractiveExperience } from './components/InteractiveExperience';
 import { AdminDashboard } from './components/AdminDashboard';
 import { HiddenAdminAccess } from './components/HiddenAdminAccess';
+import { NotFoundCardView } from './components/NotFoundCardView';
 import { FriendshipCard } from './types';
 import { soundEngine } from './utils/audio';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'landing' | 'creator' | 'experience' | 'admin'>('landing');
+  const [currentView, setCurrentView] = useState<'landing' | 'creator' | 'experience' | 'admin' | '404'>('landing');
   const [activeCard, setActiveCard] = useState<FriendshipCard | null>(null);
+  const [missingCardId, setMissingCardId] = useState<string>('');
   const [isMuted, setIsMuted] = useState(false);
   const [isLoadingCard, setIsLoadingCard] = useState(false);
 
@@ -26,18 +28,33 @@ export default function App() {
 
   const fetchCardAndOpen = async (cardId: string) => {
     setIsLoadingCard(true);
+    setMissingCardId(cardId);
     try {
       const res = await fetch(`/api/cards/${cardId}`);
       const data = await res.json();
       if (data.success && data.card) {
         setActiveCard(data.card);
         setCurrentView('experience');
+        window.history.pushState({}, '', `/card/${data.card.id}`);
+
+        // Update Dynamic SEO Metadata
+        document.title = `Friendship Surprise for ${data.card.friendName}`;
+        let metaDesc = document.querySelector('meta[name="description"]');
+        if (!metaDesc) {
+          metaDesc = document.createElement('meta');
+          metaDesc.setAttribute('name', 'description');
+          document.head.appendChild(metaDesc);
+        }
+        metaDesc.setAttribute(
+          'content',
+          `${data.card.senderName} created a special Friendship Day experience for ${data.card.friendName}.`
+        );
       } else {
-        alert('Friendship Experience Card not found.');
-        setCurrentView('landing');
+        setCurrentView('404');
       }
     } catch (err) {
       console.error('Error fetching card:', err);
+      setCurrentView('404');
     } finally {
       setIsLoadingCard(false);
     }
@@ -55,22 +72,27 @@ export default function App() {
 
   const handleCardCreated = (card: FriendshipCard) => {
     setActiveCard(card);
+    window.history.pushState({}, '', `/card/${card.id}`);
   };
 
   const handlePreviewCard = (card: FriendshipCard) => {
     setActiveCard(card);
     setCurrentView('experience');
+    if (card.id) {
+      window.history.pushState({}, '', `/card/${card.id}`);
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-amber-500 selection:text-slate-950 relative">
       {/* Header Navigation Bar */}
-      {currentView !== 'experience' && (
+      {currentView !== 'experience' && currentView !== '404' && (
         <Navbar
           onNavigate={(view) => {
             if (view === 'samples') {
               fetchCardAndOpen('sample-alex-sam');
             } else {
+              window.history.pushState({}, '', '/');
               setCurrentView(view as any);
             }
           }}
@@ -88,13 +110,19 @@ export default function App() {
         </div>
       ) : currentView === 'landing' ? (
         <Hero
-          onCreateClick={() => setCurrentView('creator')}
+          onCreateClick={() => {
+            window.history.pushState({}, '', '/');
+            setCurrentView('creator');
+          }}
           onOpenSampleCard={(id) => fetchCardAndOpen(id)}
         />
       ) : currentView === 'creator' ? (
         <CreatorWizard
           onCardCreated={handleCardCreated}
-          onCancel={() => setCurrentView('landing')}
+          onCancel={() => {
+            window.history.pushState({}, '', '/');
+            setCurrentView('landing');
+          }}
           onPreviewCard={handlePreviewCard}
         />
       ) : currentView === 'experience' && activeCard ? (
@@ -114,8 +142,23 @@ export default function App() {
         />
       ) : currentView === 'admin' ? (
         <AdminDashboard
-          onBack={() => setCurrentView('landing')}
+          onBack={() => {
+            window.history.pushState({}, '', '/');
+            setCurrentView('landing');
+          }}
           onOpenCard={(id) => fetchCardAndOpen(id)}
+        />
+      ) : currentView === '404' ? (
+        <NotFoundCardView
+          cardId={missingCardId}
+          onGoHome={() => {
+            window.history.pushState({}, '', '/');
+            setCurrentView('landing');
+          }}
+          onCreateNew={() => {
+            window.history.pushState({}, '', '/');
+            setCurrentView('creator');
+          }}
         />
       ) : null}
 

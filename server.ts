@@ -209,6 +209,19 @@ if (Object.keys(cardsStore).length === 0) {
 
 // API ROUTES BEFORE VITE MIDDLEWARE
 
+function generateUniqueCardId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let randomPart = '';
+  for (let i = 0; i < 6; i++) {
+    randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  const id = `FRD-${new Date().getFullYear()}-${randomPart}`;
+  if (cardsStore[id]) {
+    return generateUniqueCardId();
+  }
+  return id;
+}
+
 // Get all cards
 app.get('/api/cards', (req, res) => {
   const list = Object.values(cardsStore).map(card => ({
@@ -238,7 +251,7 @@ app.post('/api/cards', (req, res) => {
       return res.status(400).json({ success: false, error: 'Friend Name and Sender Name are required.' });
     }
 
-    const id = `card_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const id = generateUniqueCardId();
     const agreementNumber = `FDA-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const photos = cardData.photos && cardData.photos.length > 0
