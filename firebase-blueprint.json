@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "cards": {
+      "title": "Friendship Cards",
+      "description": "Stores user created friendship cards, agreements, certificates, and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "agreementId": { "type": "string" },
+        "certificateId": { "type": "string" },
+        "themeId": { "type": "string" },
+        "friendName": { "type": "string" },
+        "friendNickname": { "type": "string" },
+        "senderName": { "type": "string" },
+        "customMessage": { "type": "string" },
+        "friendPhotoUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "agreementNumber": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "viewsCount": { "type": "number" },
+        "downloadsCount": { "type": "number" }
+      },
+      "required": ["id", "friendName", "senderName", "themeId"]
+    },
+    "agreements": {
+      "title": "Signed Friendship Agreements",
+      "description": "Stores completed and signed friendship legal agreements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "cardId": { "type": "string" },
+        "agreementNumber": { "type": "string" },
+        "signedAt": { "type": "string" },
+        "recipientName": { "type": "string" }
+      },
+      "required": ["id", "cardId", "agreementNumber"]
+    },
+    "certificates": {
+      "title": "Issued Friendship Certificates",
+      "description": "Stores issued friendship certificates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "cardId": { "type": "string" },
+        "certificateNumber": { "type": "string" },
+        "issuedAt": { "type": "string" }
+      },
+      "required": ["id", "cardId"]
+    }
+  }
+}

@@ -3,6 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { FriendshipCard, AnalyticsStats } from './src/types';
+import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+import { db } from './src/lib/firebase';
 
 const app = express();
 const PORT = 3000;
@@ -10,7 +12,7 @@ const PORT = 3000;
 // Middleware for parsing JSON with increased limit for base64 photo/audio uploads
 app.use(express.json({ limit: '25mb' }));
 
-// Local database store directory
+// Local database store directory (fallback/secondary cache)
 const DATA_DIR = path.join(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -25,7 +27,7 @@ if (!fs.existsSync(AUDIO_DIR)) {
 // Memory cache of cards
 let cardsStore: Record<string, FriendshipCard> = {};
 
-// Load existing cards from file
+// Load existing cards from local file initial cache
 if (fs.existsSync(CARDS_FILE)) {
   try {
     const raw = fs.readFileSync(CARDS_FILE, 'utf-8');
@@ -36,14 +38,76 @@ if (fs.existsSync(CARDS_FILE)) {
   }
 }
 
-// Helper to persist cards
-const saveCards = () => {
+// Helper to persist cards locally
+const saveCardsLocal = () => {
   try {
     fs.writeFileSync(CARDS_FILE, JSON.stringify(cardsStore, null, 2));
   } catch (err) {
-    console.error('Failed to save cards:', err);
+    console.error('Failed to save cards locally:', err);
   }
 };
+
+// Helper to save card to Firebase Firestore
+const saveCardToFirestore = async (card: FriendshipCard) => {
+  try {
+    await setDoc(doc(db, 'cards', card.id), card, { merge: true });
+
+    // Also persist to agreements/certificates collections if completed
+    if (card.status === 'signed') {
+      const agreementId = card.agreementId || `${card.id}_AGR`;
+      await setDoc(doc(db, 'agreements', agreementId), {
+        id: agreementId,
+        cardId: card.id,
+        agreementNumber: card.agreementNumber,
+        senderName: card.senderName,
+        friendName: card.friendName,
+        signedAt: card.signedAt || new Date().toISOString(),
+        recipientSignature: card.recipientSignature || null
+      }, { merge: true });
+
+      const certId = card.certificateId || `CERT-${card.agreementNumber}`;
+      await setDoc(doc(db, 'certificates', certId), {
+        id: certId,
+        cardId: card.id,
+        certificateNumber: card.agreementNumber,
+        friendName: card.friendName,
+        senderName: card.senderName,
+        issuedAt: card.signedAt || new Date().toISOString()
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.error(`Firebase save error for card ${card.id}:`, err);
+  }
+};
+
+// Helper to delete card from Firestore
+const deleteCardFromFirestore = async (cardId: string) => {
+  try {
+    await deleteDoc(doc(db, 'cards', cardId));
+  } catch (err) {
+    console.error(`Firebase delete error for card ${cardId}:`, err);
+  }
+};
+
+// Load cards from Firestore at startup
+const loadCardsFromFirestore = async () => {
+  try {
+    const querySnapshot = await getDocs(collection(db, 'cards'));
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as FriendshipCard;
+      if (data && data.id) {
+        cardsStore[data.id] = data;
+      }
+    });
+    saveCardsLocal();
+    console.log(`Loaded ${querySnapshot.size} cards from Firebase Firestore database.`);
+  } catch (err) {
+    console.error('Firebase initial load error, using local cache:', err);
+  }
+};
+
+// Initial trigger to load Firestore database
+loadCardsFromFirestore();
 
 // Default initial commitments if none provided
 const DEFAULT_COMMITMENTS = [
@@ -204,7 +268,9 @@ if (Object.keys(cardsStore).length === 0) {
 
   cardsStore[sampleCard1.id] = sampleCard1;
   cardsStore[sampleCard2.id] = sampleCard2;
-  saveCards();
+  saveCardsLocal();
+  saveCardToFirestore(sampleCard1);
+  saveCardToFirestore(sampleCard2);
 }
 
 // API ROUTES BEFORE VITE MIDDLEWARE
@@ -244,7 +310,7 @@ app.get('/api/cards', (req, res) => {
 });
 
 // Create new card
-app.post('/api/cards', (req, res) => {
+app.post('/api/cards', async (req, res) => {
   try {
     const cardData: Partial<FriendshipCard> = req.body;
     if (!cardData.friendName || !cardData.senderName) {
@@ -298,7 +364,8 @@ app.post('/api/cards', (req, res) => {
     };
 
     cardsStore[id] = newCard;
-    saveCards();
+    saveCardsLocal();
+    await saveCardToFirestore(newCard);
 
     res.json({ success: true, card: newCard });
   } catch (err: any) {
@@ -307,7 +374,7 @@ app.post('/api/cards', (req, res) => {
 });
 
 // Get card by ID and increment views count & visitor log
-app.get('/api/cards/:id', (req, res) => {
+app.get('/api/cards/:id', async (req, res) => {
   const card = cardsStore[req.params.id];
   if (!card) {
     return res.status(404).json({ success: false, error: 'Friendship Experience card not found.' });
@@ -320,24 +387,26 @@ app.get('/api/cards/:id', (req, res) => {
     timestamp: new Date().toISOString(),
     userAgent: req.headers['user-agent'] || 'Unknown'
   });
-  saveCards();
+  saveCardsLocal();
+  saveCardToFirestore(card);
 
   res.json({ success: true, card });
 });
 
 // Track download
-app.post('/api/cards/:id/download', (req, res) => {
+app.post('/api/cards/:id/download', async (req, res) => {
   const card = cardsStore[req.params.id];
   if (card) {
     card.downloadsCount = (card.downloadsCount || 0) + 1;
-    saveCards();
+    saveCardsLocal();
+    saveCardToFirestore(card);
     return res.json({ success: true, downloadsCount: card.downloadsCount });
   }
   res.status(404).json({ success: false, error: 'Card not found' });
 });
 
 // Track share analytics
-app.post('/api/cards/:id/share', (req, res) => {
+app.post('/api/cards/:id/share', async (req, res) => {
   const card = cardsStore[req.params.id];
   const { channel } = req.body;
   if (card) {
@@ -348,14 +417,15 @@ app.post('/api/cards/:id/share', (req, res) => {
     else if (channel === 'telegram') card.shareAnalytics.telegram++;
     else if (channel === 'directCopy') card.shareAnalytics.directCopy++;
 
-    saveCards();
+    saveCardsLocal();
+    saveCardToFirestore(card);
     return res.json({ success: true, shareAnalytics: card.shareAnalytics });
   }
   res.status(404).json({ success: false, error: 'Card not found' });
 });
 
 // Sign agreement by recipient
-app.post('/api/cards/:id/sign', (req, res) => {
+app.post('/api/cards/:id/sign', async (req, res) => {
   const card = cardsStore[req.params.id];
   if (!card) {
     return res.status(404).json({ success: false, error: 'Friendship Experience card not found.' });
@@ -372,9 +442,22 @@ app.post('/api/cards/:id/sign', (req, res) => {
   if (certificateImageDataUrl) {
     card.certificateImageDataUrl = certificateImageDataUrl;
   }
-  saveCards();
+  saveCardsLocal();
+  await saveCardToFirestore(card);
 
   res.json({ success: true, card });
+});
+
+// Delete card (Admin operation)
+app.delete('/api/cards/:id', async (req, res) => {
+  const cardId = req.params.id;
+  if (cardsStore[cardId]) {
+    delete cardsStore[cardId];
+    saveCardsLocal();
+    await deleteCardFromFirestore(cardId);
+    return res.json({ success: true, message: 'Card deleted successfully.' });
+  }
+  res.status(404).json({ success: false, error: 'Card not found.' });
 });
 
 // Upload custom audio file (base64 string)
