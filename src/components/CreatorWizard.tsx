@@ -166,9 +166,10 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
   // Build card payload for preview or final creation
   const getCardPayload = (): FriendshipCard => {
     const mainPhoto = photos.length > 0 ? photos[0].url : 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=800&q=80';
+    const cleanId = createdCard?.id && !createdCard.id.startsWith('preview_') ? createdCard.id : undefined;
 
     return {
-      id: createdCard?.id || `preview_${Date.now()}`,
+      id: cleanId as any,
       themeId: selectedTheme,
       friendName: friendName.trim() || 'Best Friend',
       friendNickname: friendNickname.trim() || '',
@@ -193,8 +194,8 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
       },
       status: 'published',
       agreementNumber: `FDA-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      agreementId: createdCard?.agreementId || `AGR-${Date.now()}`,
-      certificateId: createdCard?.certificateId || `CERT-${Date.now()}`,
+      agreementId: createdCard?.agreementId || `AGR-${Math.floor(100000 + Math.random() * 900000)}`,
+      certificateId: createdCard?.certificateId || `CERT-${Math.floor(100000 + Math.random() * 900000)}`,
       location: location || 'Global Friendship Network',
       viewsCount: 0,
       downloadsCount: 0,
@@ -223,7 +224,9 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
     }
 
     setIsSubmitting(true);
+    console.log("Saving...");
     try {
+      console.log("Upload complete");
       const payload = getCardPayload();
       const card = await saveCard(payload);
       if (card && card.id) {
@@ -232,7 +235,9 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
 
         // Update URL bar to /card/{card.id}
         const cardUrl = getShareableCardUrl(card.id);
+        console.log("Generated Share URL:", cardUrl);
         window.history.pushState({}, '', cardUrl);
+        console.log("Navigation complete");
 
         // Generate QR code
         const qr = await QRCode.toDataURL(cardUrl);

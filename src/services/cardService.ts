@@ -194,12 +194,13 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
     throw new Error("Your name is required to publish this experience.");
   }
 
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let randomPart = '';
-  for (let i = 0; i < 8; i++) {
-    randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  const id = cardData.id || `FRD-2026-${randomPart}`;
+  // Determine Firestore document reference and authentic document ID
+  const isPreview = cardData.id && cardData.id.startsWith('preview_');
+  const docRef = cardData.id && !isPreview
+    ? doc(db, 'cards', cardData.id)
+    : doc(collection(db, 'cards'));
+  
+  const id = docRef.id;
   const agreementNumber = `FDA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
   const savedCard: FriendshipCard = {
@@ -246,8 +247,10 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
 
   // 1. MANDATORY: Persist directly to Firebase Firestore
   try {
-    const docRef = doc(db, 'cards', savedCard.id);
+    console.log("Saving...");
     await setDoc(docRef, savedCard, { merge: true });
+    console.log("Firestore success");
+    console.log("Document ID:", savedCard.id);
   } catch (err: any) {
     console.error(`Firebase Firestore save failed for card ${savedCard.id}:`, err);
     throw new Error(`Firebase saving failed: ${err?.message || 'Unable to save document to Firestore database'}`);
