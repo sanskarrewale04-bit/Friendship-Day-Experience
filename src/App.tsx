@@ -17,12 +17,22 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isLoadingCard, setIsLoadingCard] = useState(false);
 
-  // Check URL on load for direct card links (pathname, query string, or hash)
+  // Check URL on load and on popstate for direct card links (/card/[cardId])
   useEffect(() => {
-    const cardId = extractCardIdFromUrl();
-    if (cardId) {
-      fetchCardAndOpen(cardId);
-    }
+    const handleUrlChange = () => {
+      const cardId = extractCardIdFromUrl();
+      if (cardId) {
+        fetchCardAndOpen(cardId);
+      } else {
+        if (currentView === 'experience' || currentView === '404') {
+          setCurrentView('landing');
+        }
+      }
+    };
+
+    handleUrlChange();
+    window.addEventListener('popstate', handleUrlChange);
+    return () => window.removeEventListener('popstate', handleUrlChange);
   }, []);
 
   const fetchCardAndOpen = async (cardId: string) => {

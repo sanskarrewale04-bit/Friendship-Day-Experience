@@ -113,41 +113,57 @@ export const SAMPLE_CARD: FriendshipCard = {
 export function extractCardIdFromUrl(): string | null {
   if (typeof window === 'undefined') return null;
 
-  // 1. Check query parameters (?cardId=... or ?card=... or ?id=...)
+  // 1. Check pathname (/card/...)
+  const path = window.location.pathname;
+  const pathMatch = path.match(/\/card\/([a-zA-Z0-9_-]+)/i);
+  if (pathMatch && pathMatch[1] && pathMatch[1] !== 'new') return pathMatch[1];
+
+  // 2. Check query parameters (?cardId=... or ?card=... or ?id=...)
   const params = new URLSearchParams(window.location.search);
   const queryId = params.get('cardId') || params.get('card') || params.get('id');
   if (queryId) return queryId;
 
-  // 2. Check hash (#card=... or #/card/...)
+  // 3. Check hash (#card=... or #/card/...)
   const hash = window.location.hash;
   const hashMatch = hash.match(/(?:card|id)[=/]([a-zA-Z0-9_-]+)/i);
   if (hashMatch && hashMatch[1]) return hashMatch[1];
 
-  // 3. Check pathname (/card/...)
-  const path = window.location.pathname;
-  const pathMatch = path.match(/\/card\/([a-zA-Z0-9_-]+)/i);
-  if (pathMatch && pathMatch[1]) return pathMatch[1];
-
   return null;
 }
 
-// Generate shareable link compatible with GitHub Pages, Vercel, Netlify, and local Express
+// Generate unique public URL (/card/{documentId})
 export function getShareableCardUrl(cardId: string): string {
   if (typeof window === 'undefined') return `/card/${cardId}`;
-  const origin = window.location.origin;
-  const pathname = window.location.pathname.replace(/\/+$/, '');
-
-  // Query parameter link works 100% reliably on GitHub Pages static routing
-  return `${origin}${pathname}/?cardId=${cardId}`;
+  const origin = window.location.origin.replace(/\/+$/, '');
+  return `${origin}/card/${cardId}`;
 }
 
-// Fetch a card by ID with multi-layer fallback:
-// 1. Backend Express API (/api/cards/:id)
-// 2. Firebase Firestore Database (cards/:id)
-// 3. LocalStorage
-// 4. Sample card fallback
+// Fetch a card by ID directly from Firebase Firestore
 export async function fetchCardById(cardId: string): Promise<FriendshipCard | null> {
-  // Layer 1: Try Backend Express API
+  if (!cardId) return null;
+
+  // 1. Try Firebase Firestore Database directly from client
+  try {
+    const docRef = doc(db, 'cards', cardId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const card = docSnap.data() as FriendshipCard;
+      // Increment views count in Firestore
+      try {
+        await updateDoc(docRef, {
+          viewsCount: increment(1)
+        });
+        card.viewsCount = (card.viewsCount || 0) + 1;
+      } catch (e) {
+        // Ignore view update error
+      }
+      return card;
+    }
+  } catch (err) {
+    console.warn(`Firestore read failed for card ${cardId}:`, err);
+  }
+
+  // 2. Try Backend Express API as secondary verification
   try {
     const res = await fetch(`/api/cards/${cardId}`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
@@ -157,130 +173,95 @@ export async function fetchCardById(cardId: string): Promise<FriendshipCard | nu
       }
     }
   } catch (err) {
-    console.warn(`Express API fetch failed for card ${cardId}, falling back to Firebase Firestore...`);
+    console.warn(`Express API fetch failed for card ${cardId}`);
   }
 
-  // Layer 2: Try Firebase Firestore Database directly from client
-  try {
-    const docRef = doc(db, 'cards', cardId);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const card = docSnap.data() as FriendshipCard;
-      // Increment views directly in Firestore
-      try {
-        await updateDoc(docRef, {
-          viewsCount: increment(1)
-        });
-        card.viewsCount = (card.viewsCount || 0) + 1;
-      } catch (e) {
-        // Ignore view count update error if rules restrict
-      }
-      return card;
-    }
-  } catch (err) {
-    console.warn(`Firestore read failed for card ${cardId}:`, err);
-  }
-
-  // Layer 3: Check LocalStorage
-  try {
-    const local = localStorage.getItem(`card_${cardId}`);
-    if (local) {
-      return JSON.parse(local);
-    }
-  } catch (err) {
-    console.warn(`LocalStorage read failed for card ${cardId}`);
-  }
-
-  // Layer 4: Fallback for built-in sample cards
+  // 3. Built-in sample card fallback for instant demo
   if (cardId === 'sample-alex-sam') {
     return SAMPLE_CARD;
   }
 
+  // If not found in Firebase Firestore, return null to render 404 page
   return null;
 }
 
-// Save or Create a card with dual storage: Backend Express API + Firebase Firestore + LocalStorage
+// Save or Create a card permanently in Firebase Firestore
 export async function saveCard(cardData: Partial<FriendshipCard>): Promise<FriendshipCard> {
-  let savedCard: FriendshipCard | null = null;
+  if (!cardData.friendName?.trim()) {
+    throw new Error("Friend's name is required to publish this experience.");
+  }
+  if (!cardData.senderName?.trim()) {
+    throw new Error("Your name is required to publish this experience.");
+  }
 
-  // 1. Try Backend Express API
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let randomPart = '';
+  for (let i = 0; i < 8; i++) {
+    randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  const id = cardData.id || `FRD-2026-${randomPart}`;
+  const agreementNumber = `FDA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const savedCard: FriendshipCard = {
+    id,
+    agreementId: cardData.agreementId || `${id}_AGR`,
+    certificateId: cardData.certificateId || `CERT-${agreementNumber}`,
+    themeId: cardData.themeId || 'friendship',
+    friendName: cardData.friendName.trim(),
+    friendNickname: cardData.friendNickname?.trim() || '',
+    senderName: cardData.senderName.trim(),
+    customMessage: cardData.customMessage?.trim() || 'To a truly irreplaceable friend!',
+    friendPhotoUrl: cardData.friendPhotoUrl || cardData.photos?.[0]?.url || '',
+    photos: cardData.photos || [],
+    openingConfig: cardData.openingConfig || {
+      openingHeading: `Hey ${cardData.friendName || 'Friend'}...`,
+      openingMessage: cardData.customMessage || 'To a truly irreplaceable friend.',
+      messageStyle: 'best_friends',
+      typingSpeed: 'normal',
+      textAnimation: 'typewriter',
+      backgroundEffect: 'sparkles',
+      musicTiming: 'immediately',
+      continueButtonText: 'Unbox Memories'
+    },
+    commitmentsTitle: cardData.commitmentsTitle || 'OUR UNBREAKABLE PACT',
+    commitments: cardData.commitments && cardData.commitments.length > 0 ? cardData.commitments : DEFAULT_COMMITMENTS,
+    musicType: cardData.musicType || 'preset',
+    presetAudioTrack: cardData.presetAudioTrack || 'Acoustic Nostalgia (Warm Guitar & Piano)',
+    customAudioUrl: cardData.customAudioUrl || '',
+    audioSettings: cardData.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
+    senderSignature: cardData.senderSignature || {
+      type: 'type',
+      typedName: cardData.senderName,
+      signedAt: new Date().toISOString()
+    },
+    status: 'published',
+    agreementNumber,
+    location: cardData.location || 'Special Moments',
+    createdAt: new Date().toISOString(),
+    viewsCount: 1,
+    downloadsCount: 0,
+    shareAnalytics: { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
+    visitorLogs: []
+  };
+
+  // 1. MANDATORY: Persist directly to Firebase Firestore
   try {
-    const res = await fetch('/api/cards', {
+    const docRef = doc(db, 'cards', savedCard.id);
+    await setDoc(docRef, savedCard, { merge: true });
+  } catch (err: any) {
+    console.error(`Firebase Firestore save failed for card ${savedCard.id}:`, err);
+    throw new Error(`Firebase saving failed: ${err?.message || 'Unable to save document to Firestore database'}`);
+  }
+
+  // 2. Also sync to Express backend API if active
+  try {
+    await fetch('/api/cards', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cardData)
+      body: JSON.stringify(savedCard)
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.card) {
-        savedCard = data.card;
-      }
-    }
-  } catch (err) {
-    console.warn('Express API create card failed, saving directly to Firebase Firestore...');
-  }
-
-  // If Express API was not reachable (e.g. GitHub Pages static deployment), create card client-side
-  if (!savedCard) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let randomPart = '';
-    for (let i = 0; i < 6; i++) {
-      randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const id = `FRD-${new Date().getFullYear()}-${randomPart}`;
-    const agreementNumber = `FDA-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    savedCard = {
-      id,
-      agreementId: `${id}_AGR`,
-      certificateId: `CERT-${agreementNumber}`,
-      themeId: cardData.themeId || 'friendship',
-      friendName: cardData.friendName || 'Friend',
-      friendNickname: cardData.friendNickname || '',
-      senderName: cardData.senderName || 'Best Friend',
-      customMessage: cardData.customMessage || '',
-      friendPhotoUrl: cardData.friendPhotoUrl || '',
-      photos: cardData.photos || [],
-      openingConfig: cardData.openingConfig || {
-        openingHeading: `Hey ${cardData.friendName || 'Friend'}...`,
-        openingMessage: cardData.customMessage || 'To a truly irreplaceable friend.',
-        messageStyle: 'best_friends',
-        typingSpeed: 'normal',
-        textAnimation: 'typewriter',
-        backgroundEffect: 'sparkles',
-        musicTiming: 'immediately',
-        continueButtonText: 'Unbox Memories'
-      },
-      commitmentsTitle: cardData.commitmentsTitle || 'OUR UNBREAKABLE PACT',
-      commitments: cardData.commitments && cardData.commitments.length > 0 ? cardData.commitments : DEFAULT_COMMITMENTS,
-      musicType: cardData.musicType || 'preset',
-      presetAudioTrack: cardData.presetAudioTrack || 'Acoustic Nostalgia (Warm Guitar & Piano)',
-      customAudioUrl: cardData.customAudioUrl || '',
-      audioSettings: cardData.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
-      senderSignature: cardData.senderSignature || { type: 'draw', typedName: cardData.senderName || 'Sender', signedAt: new Date().toISOString() },
-      status: 'published',
-      agreementNumber,
-      location: cardData.location || 'Special Moments',
-      createdAt: new Date().toISOString(),
-      viewsCount: 1,
-      downloadsCount: 0,
-      shareAnalytics: { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
-      visitorLogs: []
-    };
-  }
-
-  // 2. Persist to Firebase Firestore Database directly from client
-  try {
-    await setDoc(doc(db, 'cards', savedCard.id), savedCard, { merge: true });
-  } catch (err) {
-    console.error(`Firebase Firestore direct save failed for ${savedCard.id}:`, err);
-  }
-
-  // 3. Cache in LocalStorage
-  try {
-    localStorage.setItem(`card_${savedCard.id}`, JSON.stringify(savedCard));
-  } catch (err) {
-    console.warn(`LocalStorage write failed for ${savedCard.id}`);
+  } catch (e) {
+    // Backend API sync optional
   }
 
   return savedCard;

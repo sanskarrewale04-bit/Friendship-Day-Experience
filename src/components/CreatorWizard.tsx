@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { THEMES, PRESET_MESSAGES } from '../data/themes';
 import { ThemeId, FriendshipCard, SignatureData, PhotoItem, CommitmentItem, OpeningConfig } from '../types';
-import { saveCard, getShareableCardUrl } from '../services/cardService';
+import { saveCard, getShareableCardUrl, trackCardShare } from '../services/cardService';
 import { SignatureCanvas } from './SignatureCanvas';
 import { EmojiPickerModal } from './EmojiPickerModal';
 import { MultiPhotoUploader } from './MultiPhotoUploader';
@@ -206,26 +206,43 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
 
   // Save & publish card
   const handlePublishCard = async () => {
+    if (!friendName.trim()) {
+      alert("Please enter your friend's name in Step 2.");
+      setStep(2);
+      return;
+    }
+    if (!senderName.trim()) {
+      alert("Please enter your name in Step 2.");
+      setStep(2);
+      return;
+    }
+    if (!customMessage.trim()) {
+      alert("Please write a message for your friend in Step 3.");
+      setStep(3);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const payload = getCardPayload();
       const card = await saveCard(payload);
-      if (card) {
+      if (card && card.id) {
         setCreatedCard(card);
         onCardCreated(card);
 
-        // Generate QR code
+        // Update URL bar to /card/{card.id}
         const cardUrl = getShareableCardUrl(card.id);
+        window.history.pushState({}, '', cardUrl);
+
+        // Generate QR code
         const qr = await QRCode.toDataURL(cardUrl);
         setQrDataUrl(qr);
 
         setStep(9); // Go to final share screen
-      } else {
-        alert('Failed to publish card.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error publishing card:', err);
-      alert('Error publishing card. Please try again.');
+      alert(err?.message || 'Failed to save card to Firebase. Please check your network connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -712,11 +729,11 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
           {/* Shareable Link Box */}
           <div className="p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-2 mb-6">
             <span className="text-xs text-amber-300 font-mono truncate pl-2">
-              {window.location.origin}/card/{createdCard.id}
+              {getShareableCardUrl(createdCard.id)}
             </span>
             <button
               onClick={copyShareLink}
-              className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 transition-colors whitespace-nowrap"
+              className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer"
             >
               {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
               {copiedLink ? 'Copied!' : 'Copy Link'}
@@ -734,48 +751,30 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
           {/* Quick Social Share Buttons */}
           <div className="grid grid-cols-2 gap-2.5 mb-6">
             <a
-              href={`https://wa.me/?text=${encodeURIComponent(`Hey ${createdCard.friendName}! I made an interactive Friendship Experience for you. Open it here: ${window.location.origin}/card/${createdCard.id}`)}`}
+              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Hey ${createdCard.friendName}! ${createdCard.senderName} created a special Friendship Day experience for you. Open it here: ${getShareableCardUrl(createdCard.id)}`)}`}
               target="_blank"
               rel="noreferrer"
-              onClick={() => {
-                fetch(`/api/cards/${createdCard.id}/share`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ channel: 'whatsapp' })
-                }).catch(() => {});
-              }}
+              onClick={() => trackCardShare(createdCard.id, 'whatsapp')}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" /> WhatsApp
             </a>
 
             <a
-              href={`https://t.me/share/url?url=${encodeURIComponent(`${window.location.origin}/card/${createdCard.id}`)}&text=${encodeURIComponent(`Check out this Friendship Experience for ${createdCard.friendName}!`)}`}
+              href={`https://t.me/share/url?url=${encodeURIComponent(getShareableCardUrl(createdCard.id))}&text=${encodeURIComponent(`Check out this Friendship Experience for ${createdCard.friendName}!`)}`}
               target="_blank"
               rel="noreferrer"
-              onClick={() => {
-                fetch(`/api/cards/${createdCard.id}/share`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ channel: 'telegram' })
-                }).catch(() => {});
-              }}
+              onClick={() => trackCardShare(createdCard.id, 'telegram')}
               className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" /> Telegram
             </a>
 
             <a
-              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(`${window.location.origin}/card/${createdCard.id}`)}`}
+              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(getShareableCardUrl(createdCard.id))}`}
               target="_blank"
               rel="noreferrer"
-              onClick={() => {
-                fetch(`/api/cards/${createdCard.id}/share`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ channel: 'facebook' })
-                }).catch(() => {});
-              }}
+              onClick={() => trackCardShare(createdCard.id, 'facebook')}
               className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" /> Facebook
@@ -784,6 +783,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
             <button
               onClick={() => {
                 copyShareLink();
+                trackCardShare(createdCard.id, 'directCopy');
                 alert('Card link copied! You can now paste it directly into Instagram Story or DM.');
               }}
               className="bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
@@ -794,7 +794,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
 
           <button
             onClick={() => onPreviewCard(createdCard)}
-            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3 px-4 rounded-2xl transition-all text-xs flex items-center justify-center gap-2"
+            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3 px-4 rounded-2xl transition-all text-xs flex items-center justify-center gap-2 cursor-pointer"
           >
             <Play className="w-4 h-4 text-amber-400 fill-amber-400" /> Watch Experience Now
           </button>
