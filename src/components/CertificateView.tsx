@@ -5,6 +5,7 @@ import { safeHtml2Canvas } from '../utils/safeHtml2canvas';
 import QRCode from 'qrcode';
 import { HiddenAdminAccess } from './HiddenAdminAccess';
 import { ShareModal } from './ShareModal';
+import { trackCardDownload } from '../services/cardService';
 
 interface CertificateViewProps {
   card: FriendshipCard;
@@ -35,18 +36,21 @@ export const CertificateView: React.FC<CertificateViewProps> = ({ card, onCreate
     if (!certRef.current || isDownloading) return;
     setIsDownloading(true);
     try {
-      fetch(`/api/cards/${card.id}/download`, { method: 'POST' }).catch(() => {});
+      trackCardDownload(card.id);
       const canvas = await safeHtml2Canvas(certRef.current, { scale: 2, useCORS: true, allowTaint: true, logging: false });
       const dataUrl = canvas.toDataURL('image/png');
+      if (!dataUrl || dataUrl === 'data:,') {
+        throw new Error('Canvas export failed to produce image data.');
+      }
       const a = document.createElement('a');
       a.download = `Certificate_Friendship_${card.agreementNumber}.png`;
       a.href = dataUrl;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    } catch (err) {
-      console.error(err);
-      alert('Unable to generate PNG certificate image automatically.');
+    } catch (err: any) {
+      console.error('Certificate PNG download error:', err);
+      alert(`Certificate PNG generation error: ${err?.message || 'Unable to capture certificate'}. You can also click "Print Certificate" to save as PDF!`);
     } finally {
       setIsDownloading(false);
     }

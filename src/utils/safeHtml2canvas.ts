@@ -102,6 +102,41 @@ export function parseColorToRgb(colorStr: string): string {
 }
 
 export async function safeHtml2Canvas(element: HTMLElement, options: Parameters<typeof html2canvas>[1] = {}) {
+  // 1. Wait for fonts to be ready
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+    try {
+      await document.fonts.ready;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // 2. Pre-inline external images in cloned or source element if cross-origin
+  const imgs = Array.from(element.querySelectorAll<HTMLImageElement>('img'));
+  const originalSources: { el: HTMLImageElement; src: string }[] = [];
+
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.src;
+      if (!src || src.startsWith('data:')) return;
+      try {
+        const resp = await fetch(src, { mode: 'cors' });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          originalSources.push({ el: img, src });
+          img.src = dataUrl;
+        }
+      } catch (e) {
+        // If fetch fails, keep original src
+      }
+    })
+  );
+
   // Backup and temporary convert style tags in main document
   const originalStyles: { el: HTMLStyleElement; text: string }[] = [];
   if (typeof document !== 'undefined') {
@@ -125,6 +160,10 @@ export async function safeHtml2Canvas(element: HTMLElement, options: Parameters<
 
   try {
     const canvas = await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
       ...options,
       onclone: (clonedDoc, clonedElement) => {
         // 1. Sanitize all <style> tags in clonedDoc
@@ -200,6 +239,10 @@ export async function safeHtml2Canvas(element: HTMLElement, options: Parameters<
     // Restore original style tags in main document
     originalStyles.forEach(({ el, text }) => {
       el.textContent = text;
+    });
+    // Restore original image sources
+    originalSources.forEach(({ el, src }) => {
+      el.src = src;
     });
   }
 }
