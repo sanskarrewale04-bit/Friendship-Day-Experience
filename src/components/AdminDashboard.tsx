@@ -17,10 +17,11 @@ import {
   Award,
   Clock,
   Filter,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Trash2
 } from 'lucide-react';
 import { THEMES } from '../data/themes';
-import { getAllCardsForAdmin } from '../services/cardService';
+import { getAllCardsForAdmin, deleteCardForAdmin } from '../services/cardService';
 
 interface AdminDashboardProps {
   onBack: () => void;
@@ -357,12 +358,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onOpenCa
                       <td className="p-3 font-mono text-amber-400 font-bold">{card.downloadsCount || 0}</td>
                       <td className="p-3 font-mono">{card.photos?.length || 1}</td>
                       <td className="p-3">
-                        <button
-                          onClick={() => onOpenCard(card.id)}
-                          className="p-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg font-bold flex items-center gap-1 text-[11px] transition-colors cursor-pointer"
-                        >
-                          <Play className="w-3 h-3 fill-slate-950" /> Experience
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => onOpenCard(card.id)}
+                            className="p-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg font-bold flex items-center gap-1 text-[11px] transition-colors cursor-pointer"
+                          >
+                            <Play className="w-3 h-3 fill-slate-950" /> Experience
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`Are you sure you want to delete the experience for "${card.friendName}"?`)) {
+                                await deleteCardForAdmin(card.id);
+                                fetchAdminData();
+                              }
+                            }}
+                            className="p-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Experience"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

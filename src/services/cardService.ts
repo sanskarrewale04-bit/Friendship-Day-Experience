@@ -1,5 +1,6 @@
 import { FriendshipCard } from '../types';
 import { db } from '../lib/firebase';
+import { uploadToFirebaseStorage } from './storageService';
 import {
   collection,
   doc,
@@ -203,6 +204,31 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
   const id = docRef.id;
   const agreementNumber = `FDA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
+  console.log("Upload complete - processing media...");
+
+  // Upload photos to Firebase Storage if data URLs
+  const uploadedPhotos = await Promise.all(
+    (cardData.photos || []).map(async (photo, idx) => {
+      if (photo.url && photo.url.startsWith('data:')) {
+        const path = `cards/${id}/photos/photo_${idx}_${Date.now()}.jpg`;
+        const firestoreStorageUrl = await uploadToFirebaseStorage(photo.url, path);
+        return { ...photo, url: firestoreStorageUrl };
+      }
+      return photo;
+    })
+  );
+
+  // Upload custom audio to Firebase Storage if data URL
+  let customAudioUrl = cardData.customAudioUrl || '';
+  if (customAudioUrl && customAudioUrl.startsWith('data:')) {
+    const audioPath = `cards/${id}/music/custom_audio_${Date.now()}.mp3`;
+    customAudioUrl = await uploadToFirebaseStorage(customAudioUrl, audioPath);
+  }
+
+  const mainPhotoUrl = uploadedPhotos[0]?.url || cardData.friendPhotoUrl || '';
+
+  const now = new Date().toISOString();
+
   const savedCard: FriendshipCard = {
     id,
     agreementId: cardData.agreementId || `${id}_AGR`,
@@ -212,8 +238,8 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
     friendNickname: cardData.friendNickname?.trim() || '',
     senderName: cardData.senderName.trim(),
     customMessage: cardData.customMessage?.trim() || 'To a truly irreplaceable friend!',
-    friendPhotoUrl: cardData.friendPhotoUrl || cardData.photos?.[0]?.url || '',
-    photos: cardData.photos || [],
+    friendPhotoUrl: mainPhotoUrl,
+    photos: uploadedPhotos,
     openingConfig: cardData.openingConfig || {
       openingHeading: `Hey ${cardData.friendName || 'Friend'}...`,
       openingMessage: cardData.customMessage || 'To a truly irreplaceable friend.',
@@ -228,27 +254,45 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
     commitments: cardData.commitments && cardData.commitments.length > 0 ? cardData.commitments : DEFAULT_COMMITMENTS,
     musicType: cardData.musicType || 'preset',
     presetAudioTrack: cardData.presetAudioTrack || 'Acoustic Nostalgia (Warm Guitar & Piano)',
-    customAudioUrl: cardData.customAudioUrl || '',
+    customAudioUrl: customAudioUrl,
     audioSettings: cardData.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
     senderSignature: cardData.senderSignature || {
       type: 'type',
       typedName: cardData.senderName,
-      signedAt: new Date().toISOString()
+      signedAt: now
     },
     status: 'published',
     agreementNumber,
     location: cardData.location || 'Special Moments',
-    createdAt: new Date().toISOString(),
-    viewsCount: 1,
-    downloadsCount: 0,
-    shareAnalytics: { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
-    visitorLogs: []
+    createdAt: cardData.createdAt || now,
+    viewsCount: cardData.viewsCount || 1,
+    downloadsCount: cardData.downloadsCount || 0,
+    shareAnalytics: cardData.shareAnalytics || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
+    visitorLogs: cardData.visitorLogs || []
+  };
+
+  // Additional explicit Firestore aliases for search & cross-compatibility
+  const firestoreDocPayload = {
+    ...savedCard,
+    receiverName: savedCard.friendName,
+    message: savedCard.customMessage,
+    theme: savedCard.themeId,
+    music: savedCard.musicType === 'custom' ? savedCard.customAudioUrl : savedCard.presetAudioTrack,
+    openingMessage: savedCard.openingConfig.openingMessage,
+    agreement: savedCard.commitments,
+    certificate: {
+      certificateId: savedCard.certificateId,
+      agreementNumber: savedCard.agreementNumber,
+      signedAt: savedCard.senderSignature.signedAt
+    },
+    updatedAt: now,
+    published: true
   };
 
   // 1. MANDATORY: Persist directly to Firebase Firestore
   try {
     console.log("Saving...");
-    await setDoc(docRef, savedCard, { merge: true });
+    await setDoc(docRef, firestoreDocPayload, { merge: true });
     console.log("Firestore success");
     console.log("Document ID:", savedCard.id);
   } catch (err: any) {

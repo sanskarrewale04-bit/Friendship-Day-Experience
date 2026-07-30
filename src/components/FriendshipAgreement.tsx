@@ -34,15 +34,18 @@ export const FriendshipAgreement: React.FC<FriendshipAgreementProps> = ({
       trackCardDownload(card.id);
       const canvas = await safeHtml2Canvas(agreementRef.current, { scale: 2, useCORS: true, allowTaint: true, logging: false });
       const dataUrl = canvas.toDataURL('image/png');
+      if (!dataUrl || dataUrl === 'data:,') {
+        throw new Error('Canvas capture produced empty image data.');
+      }
       const link = document.createElement('a');
       link.download = `Friendship_Agreement_${card.agreementNumber}.png`;
       link.href = dataUrl;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } catch (err) {
-      console.error('Download error:', err);
-      alert('Unable to generate PNG image. You can also use the "Print" button to Save as PDF!');
+    } catch (err: any) {
+      console.error('Agreement PNG download error:', err);
+      alert(`Agreement PNG capture error: ${err?.message || 'Unable to generate PNG'}. You can also use the "Print Agreement" button to save directly as PDF!`);
     } finally {
       setIsDownloading(false);
     }
