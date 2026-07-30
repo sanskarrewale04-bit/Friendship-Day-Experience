@@ -20,6 +20,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { THEMES } from '../data/themes';
+import { getAllCardsForAdmin } from '../services/cardService';
 
 interface AdminDashboardProps {
   onBack: () => void;
@@ -42,14 +43,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onOpenCa
   const fetchAdminData = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/analytics');
-      const data = await res.json();
-      if (data.success) {
-        setStats(data.stats);
-        if (data.allCardsDetail) {
-          setAllCards(data.allCardsDetail);
+      let cards: FriendshipCard[] = [];
+      try {
+        const res = await fetch('/api/analytics', { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            setStats(data.stats);
+            if (data.allCardsDetail) {
+              cards = data.allCardsDetail;
+            }
+          }
         }
+      } catch (e) {
+        // Express endpoint offline or not hosted, fallback to direct Firestore
       }
+
+      if (cards.length === 0) {
+        cards = await getAllCardsForAdmin();
+      }
+
+      setAllCards(cards);
+
+      // Compute stats from cards
+      const totalCreated = cards.length;
+      const totalSigned = cards.filter((c) => c.status === 'signed').length;
+      const totalViews = cards.reduce((sum, c) => sum + (c.viewsCount || 0), 0);
+      const totalDownloads = cards.reduce((sum, c) => sum + (c.downloadsCount || 0), 0);
+
+      setStats({
+        totalCardsCreated: totalCreated,
+        totalSignedAgreements: totalSigned,
+        totalViews,
+        totalDownloads,
+        shareAnalyticsBreakdown: {
+          whatsapp: cards.reduce((s, c) => s + (c.shareAnalytics?.whatsapp || 0), 0),
+          telegram: cards.reduce((s, c) => s + (c.shareAnalytics?.telegram || 0), 0),
+          facebook: cards.reduce((s, c) => s + (c.shareAnalytics?.facebook || 0), 0),
+          directCopy: cards.reduce((s, c) => s + (c.shareAnalytics?.directCopy || 0), 0)
+        },
+        visitorLogs: cards.flatMap((c) => c.visitorLogs || [])
+      });
     } catch (err) {
       console.error('Failed to load admin data:', err);
     } finally {

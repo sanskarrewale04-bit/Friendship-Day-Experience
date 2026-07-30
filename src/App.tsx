@@ -8,6 +8,7 @@ import { HiddenAdminAccess } from './components/HiddenAdminAccess';
 import { NotFoundCardView } from './components/NotFoundCardView';
 import { FriendshipCard } from './types';
 import { soundEngine } from './utils/audio';
+import { extractCardIdFromUrl, fetchCardById, getShareableCardUrl } from './services/cardService';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'landing' | 'creator' | 'experience' | 'admin' | '404'>('landing');
@@ -16,12 +17,10 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isLoadingCard, setIsLoadingCard] = useState(false);
 
-  // Check URL on load for direct card links e.g. /card/:id
+  // Check URL on load for direct card links (pathname, query string, or hash)
   useEffect(() => {
-    const path = window.location.pathname;
-    const match = path.match(/\/card\/([a-zA-Z0-9_-]+)/);
-    if (match && match[1]) {
-      const cardId = match[1];
+    const cardId = extractCardIdFromUrl();
+    if (cardId) {
       fetchCardAndOpen(cardId);
     }
   }, []);
@@ -30,15 +29,17 @@ export default function App() {
     setIsLoadingCard(true);
     setMissingCardId(cardId);
     try {
-      const res = await fetch(`/api/cards/${cardId}`);
-      const data = await res.json();
-      if (data.success && data.card) {
-        setActiveCard(data.card);
+      const card = await fetchCardById(cardId);
+      if (card) {
+        setActiveCard(card);
         setCurrentView('experience');
-        window.history.pushState({}, '', `/card/${data.card.id}`);
+
+        // Update URL safely for sharing
+        const newUrl = getShareableCardUrl(card.id);
+        window.history.pushState({}, '', newUrl);
 
         // Update Dynamic SEO Metadata
-        document.title = `Friendship Surprise for ${data.card.friendName}`;
+        document.title = `Friendship Surprise for ${card.friendName}`;
         let metaDesc = document.querySelector('meta[name="description"]');
         if (!metaDesc) {
           metaDesc = document.createElement('meta');
@@ -47,7 +48,7 @@ export default function App() {
         }
         metaDesc.setAttribute(
           'content',
-          `${data.card.senderName} created a special Friendship Day experience for ${data.card.friendName}.`
+          `${card.senderName} created a special Friendship Day experience for ${card.friendName}.`
         );
       } else {
         setCurrentView('404');
@@ -72,14 +73,14 @@ export default function App() {
 
   const handleCardCreated = (card: FriendshipCard) => {
     setActiveCard(card);
-    window.history.pushState({}, '', `/card/${card.id}`);
+    window.history.pushState({}, '', getShareableCardUrl(card.id));
   };
 
   const handlePreviewCard = (card: FriendshipCard) => {
     setActiveCard(card);
     setCurrentView('experience');
     if (card.id) {
-      window.history.pushState({}, '', `/card/${card.id}`);
+      window.history.pushState({}, '', getShareableCardUrl(card.id));
     }
   };
 

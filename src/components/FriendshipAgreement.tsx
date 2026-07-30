@@ -4,6 +4,7 @@ import { THEMES } from '../data/themes';
 import { ShieldCheck, Download, Printer, Award, Loader2 } from 'lucide-react';
 import { safeHtml2Canvas } from '../utils/safeHtml2canvas';
 import { HiddenAdminAccess } from './HiddenAdminAccess';
+import { trackCardDownload } from '../services/cardService';
 
 interface FriendshipAgreementProps {
   card: FriendshipCard;
@@ -30,7 +31,7 @@ export const FriendshipAgreement: React.FC<FriendshipAgreementProps> = ({
     if (!agreementRef.current || isDownloading) return;
     setIsDownloading(true);
     try {
-      fetch(`/api/cards/${card.id}/download`, { method: 'POST' }).catch(() => {});
+      trackCardDownload(card.id);
       const canvas = await safeHtml2Canvas(agreementRef.current, { scale: 2, useCORS: true, allowTaint: true, logging: false });
       const dataUrl = canvas.toDataURL('image/png');
       const link = document.createElement('a');
@@ -49,7 +50,7 @@ export const FriendshipAgreement: React.FC<FriendshipAgreementProps> = ({
 
   // Handle Print
   const handlePrint = () => {
-    fetch(`/api/cards/${card.id}/download`, { method: 'POST' }).catch(() => {});
+    trackCardDownload(card.id);
     window.print();
   };
 

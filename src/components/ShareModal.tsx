@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { FriendshipCard } from '../types';
-import { X, Copy, Check, Share2, QrCode, Download } from 'lucide-react';
+import { X, Copy, Check, Share2, Download } from 'lucide-react';
 import QRCode from 'qrcode';
+import { getShareableCardUrl, trackCardShare } from '../services/cardService';
 
 interface ShareModalProps {
   card: FriendshipCard;
@@ -13,7 +14,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ card, isOpen, onClose })
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
 
-  const cardUrl = typeof window !== 'undefined' ? `${window.location.origin}/card/${card.id}` : `/card/${card.id}`;
+  const cardUrl = getShareableCardUrl(card.id);
   const shareMessage = `Hey ${card.friendName}! ${card.senderName} created a special Friendship Day experience for you. Open it here: ${cardUrl}`;
 
   useEffect(() => {
@@ -27,11 +28,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ card, isOpen, onClose })
   if (!isOpen) return null;
 
   const trackShare = (channel: string) => {
-    fetch(`/api/cards/${card.id}/share`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel })
-    }).catch(() => {});
+    trackCardShare(card.id, channel);
   };
 
   const copyToClipboard = () => {

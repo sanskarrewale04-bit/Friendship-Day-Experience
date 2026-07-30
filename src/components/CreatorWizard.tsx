@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { THEMES, PRESET_MESSAGES } from '../data/themes';
 import { ThemeId, FriendshipCard, SignatureData, PhotoItem, CommitmentItem, OpeningConfig } from '../types';
+import { saveCard, getShareableCardUrl } from '../services/cardService';
 import { SignatureCanvas } from './SignatureCanvas';
 import { EmojiPickerModal } from './EmojiPickerModal';
 import { MultiPhotoUploader } from './MultiPhotoUploader';
@@ -203,32 +204,28 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
     };
   };
 
-  // Submit to backend
+  // Save & publish card
   const handlePublishCard = async () => {
     setIsSubmitting(true);
     try {
       const payload = getCardPayload();
-      const res = await fetch('/api/cards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success && data.card) {
-        setCreatedCard(data.card);
-        onCardCreated(data.card);
+      const card = await saveCard(payload);
+      if (card) {
+        setCreatedCard(card);
+        onCardCreated(card);
 
         // Generate QR code
-        const cardUrl = `${window.location.origin}/card/${data.card.id}`;
+        const cardUrl = getShareableCardUrl(card.id);
         const qr = await QRCode.toDataURL(cardUrl);
         setQrDataUrl(qr);
 
         setStep(9); // Go to final share screen
       } else {
-        alert('Failed to publish card: ' + (data.error || 'Unknown error'));
+        alert('Failed to publish card.');
       }
     } catch (err) {
       console.error('Error publishing card:', err);
+      alert('Error publishing card. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -236,7 +233,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
 
   const copyShareLink = () => {
     if (!createdCard) return;
-    const url = `${window.location.origin}/card/${createdCard.id}`;
+    const url = getShareableCardUrl(createdCard.id);
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);

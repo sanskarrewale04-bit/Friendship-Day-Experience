@@ -12,6 +12,7 @@ import { CommitmentsSection } from './CommitmentsSection';
 import { MemoryTimeline } from './MemoryTimeline';
 import { Play, Sparkles, Heart, ArrowRight, ShieldCheck, Check, Volume2, VolumeX, Flame } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { signCardAgreement } from '../services/cardService';
 
 interface InteractiveExperienceProps {
   card: FriendshipCard;
@@ -78,13 +79,9 @@ export const InteractiveExperience: React.FC<InteractiveExperienceProps> = ({
     setRecipientSig(sig);
     setShowSignPad(false);
 
-    // Persist to server
+    // Persist to server & Firebase Firestore
     try {
-      await fetch(`/api/cards/${card.id}/sign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientSignature: sig })
-      });
+      await signCardAgreement(card.id, card.friendName, sig.typedName || sig.signatureDataUrl || 'Recipient', undefined);
     } catch (err) {
       console.error('Failed to save recipient signature:', err);
     }

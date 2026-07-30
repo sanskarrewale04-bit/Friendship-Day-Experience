@@ -27,6 +27,7 @@ export interface ThemeConfig {
 export interface SignatureData {
   type: 'draw' | 'type';
   dataUrl?: string; // canvas PNG data url
+  signatureDataUrl?: string; // fallback alias
   typedName?: string;
   signedAt: string;
 }
@@ -56,6 +57,7 @@ export interface VisitorLog {
 export interface ShareAnalytics {
   whatsapp: number;
   telegram: number;
+  facebook?: number;
   directCopy: number;
 }
 
@@ -108,11 +110,14 @@ export interface FriendshipCard {
 }
 
 export interface AnalyticsStats {
-  totalCards: number;
+  totalCards?: number;
+  totalCardsCreated?: number;
   totalViews: number;
   totalSignedAgreements: number;
-  totalCustomAudioUploaded: number;
+  totalCustomAudioUploaded?: number;
   totalDownloads: number;
-  themeBreakdown: Record<ThemeId, number>;
+  themeBreakdown?: Partial<Record<ThemeId, number>>;
+  shareAnalyticsBreakdown?: ShareAnalytics;
+  visitorLogs?: VisitorLog[];
 }
 
