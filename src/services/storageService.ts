@@ -1,8 +1,8 @@
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
 
 /**
- * Helper function to convert a base64 Data URL to a Blob with its MIME type
+ * Converts a base64 Data URL to a Blob with its MIME type
  */
 export function dataURLToBlob(dataUrl: string): { blob: Blob; mimeType: string } {
   const arr = dataUrl.split(',');
@@ -18,7 +18,103 @@ export function dataURLToBlob(dataUrl: string): { blob: Blob; mimeType: string }
 }
 
 /**
- * Retry helper for asynchronous operations with exponential/step backoff
+ * Compresses images to a maximum dimension of 1920px and JPEG quality of 0.8.
+ * Leaves audio and non-image media untouched.
+ */
+export async function compressImageIfNeeded(
+  dataOrFile: string | File | Blob,
+  maxDimension = 1920,
+  quality = 0.8
+): Promise<{ blob: Blob; contentType: string }> {
+  // Check if media is audio or non-image
+  if (dataOrFile instanceof File || dataOrFile instanceof Blob) {
+    const type = dataOrFile.type || '';
+    if (type.startsWith('audio/') || type.includes('mpeg') || type.includes('mp3') || type.includes('wav')) {
+      return { blob: dataOrFile, contentType: type || 'audio/mpeg' };
+    }
+  }
+
+  if (typeof dataOrFile === 'string' && dataOrFile.startsWith('data:audio/')) {
+    const { blob, mimeType } = dataURLToBlob(dataOrFile);
+    return { blob, contentType: mimeType };
+  }
+
+  // Compress image via Canvas
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    const loadAndProcess = () => {
+      let width = img.width;
+      let height = img.height;
+
+      if (!width || !height) {
+        if (dataOrFile instanceof Blob) {
+          return resolve({ blob: dataOrFile, contentType: dataOrFile.type || 'image/jpeg' });
+        }
+        const { blob, mimeType } = dataURLToBlob(dataOrFile as string);
+        return resolve({ blob, contentType: mimeType });
+      }
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        if (dataOrFile instanceof Blob) {
+          return resolve({ blob: dataOrFile, contentType: dataOrFile.type || 'image/jpeg' });
+        }
+        const { blob, mimeType } = dataURLToBlob(dataOrFile as string);
+        return resolve({ blob, contentType: mimeType });
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (compressedBlob) => {
+          if (compressedBlob) {
+            resolve({ blob: compressedBlob, contentType: 'image/jpeg' });
+          } else {
+            if (dataOrFile instanceof Blob) {
+              return resolve({ blob: dataOrFile, contentType: dataOrFile.type || 'image/jpeg' });
+            }
+            const { blob, mimeType } = dataURLToBlob(dataOrFile as string);
+            resolve({ blob, contentType: mimeType });
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+
+    img.onload = loadAndProcess;
+    img.onerror = () => {
+      if (dataOrFile instanceof Blob) {
+        return resolve({ blob: dataOrFile, contentType: dataOrFile.type || 'image/jpeg' });
+      }
+      const { blob, mimeType } = dataURLToBlob(dataOrFile as string);
+      resolve({ blob, contentType: mimeType });
+    };
+
+    if (typeof dataOrFile === 'string') {
+      img.src = dataOrFile;
+    } else {
+      img.src = URL.createObjectURL(dataOrFile);
+    }
+  });
+}
+
+/**
+ * Retry helper with exponential backoff
  */
 async function uploadWithRetry<T>(
   fn: (attempt: number) => Promise<T>,
@@ -41,13 +137,16 @@ async function uploadWithRetry<T>(
 }
 
 /**
- * Uploads a Data URL, File, or Blob to Firebase Storage using uploadBytes().
- * Returns the public download URL obtained via getDownloadURL() ONLY after uploadBytes() succeeds.
- * Logs exact errors, retries failed uploads, and throws on failure to prevent publishing broken cards.
+ * Uploads a Data URL, File, or Blob to Firebase Storage using uploadBytesResumable().
+ * - Uses original File/Blob when available.
+ * - Compresses images to max 1920px, quality 0.8 (does not compress audio).
+ * - Tracks progress with uploadBytesResumable.
+ * - Falls back seamlessly to server proxy if client CORS request fails.
  */
 export async function uploadToFirebaseStorage(
   dataOrFile: string | File | Blob,
-  path: string
+  path: string,
+  onProgress?: (progressPercent: number) => void
 ): Promise<string> {
   if (!dataOrFile) {
     throw new Error('No data or file provided for upload.');
@@ -58,54 +157,70 @@ export async function uploadToFirebaseStorage(
     return dataOrFile;
   }
 
-  // Attempt 1: Direct client-side Firebase Storage upload using uploadBytes() with retry logic
+  // Compress image if applicable (leaves audio files uncompressed)
+  const { blob: blobToUpload, contentType } = await compressImageIfNeeded(dataOrFile, 1920, 0.8);
+
+  // Attempt 1: Direct client-side Firebase Storage upload using uploadBytesResumable() with retry logic
   try {
     return await uploadWithRetry(async () => {
       const storageRef = ref(storage, path);
-      let blobToUpload: Blob;
-      let contentType = 'image/jpeg';
 
-      if (typeof dataOrFile === 'string') {
-        const { blob, mimeType } = dataURLToBlob(dataOrFile);
-        blobToUpload = blob;
-        contentType = mimeType;
-      } else {
-        blobToUpload = dataOrFile;
-        contentType = dataOrFile.type || 'image/jpeg';
-      }
-
-      // Step 1: Execute uploadBytes
-      console.log(`[Firebase Storage Debug] Preparing uploadBytes for path: "${path}"`, {
+      console.log(`[Firebase Storage] Starting uploadBytesResumable for path: "${path}"`, {
         storageBucket: storageRef.bucket,
         fullPath: storageRef.fullPath,
-        isBlob: blobToUpload instanceof Blob,
         blobSize: blobToUpload.size,
-        blobType: blobToUpload.type,
         contentType
       });
 
-      const snapshot = await uploadBytes(storageRef, blobToUpload, { contentType });
-      console.log(`[Firebase Storage Debug] uploadBytes succeeded for "${path}"!`, {
-        refFullPath: snapshot.ref.fullPath,
-        metadataSize: snapshot.metadata?.size
+      const uploadTask = uploadBytesResumable(storageRef, blobToUpload, { contentType });
+
+      await new Promise<void>((resolve, reject) => {
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            console.log(`[Firebase Storage] Uploading ${path}: ${progress.toFixed(1)}%`);
+            if (onProgress) {
+              onProgress(Math.round(progress));
+            }
+          },
+          (error) => {
+            console.error(`[Firebase Storage] uploadBytesResumable error for ${path}:`, error);
+            reject(error);
+          },
+          () => {
+            resolve();
+          }
+        );
       });
 
-      // Step 2: Get Download URL ONLY after uploadBytes succeeds
-      const downloadUrl = await getDownloadURL(snapshot.ref);
-      console.log(`[Firebase Storage Debug] getDownloadURL succeeded for "${path}":`, downloadUrl);
+      const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+      console.log(`[Firebase Storage] Upload completed for "${path}":`, downloadUrl);
       return downloadUrl;
     }, 3, 1000);
   } catch (clientError: any) {
     console.warn(`[Firebase Storage Client Upload Failed for ${path}]:`, clientError?.message || clientError);
 
     // Attempt 2: Server API endpoint fallback (bypasses browser CORS policy restrictions)
-    if (typeof dataOrFile === 'string' && dataOrFile.startsWith('data:')) {
+    let dataUrlToSend: string | null = null;
+
+    if (typeof dataOrFile === 'string') {
+      dataUrlToSend = dataOrFile;
+    } else if (blobToUpload instanceof Blob) {
+      dataUrlToSend = await new Promise<string>((res) => {
+        const reader = new FileReader();
+        reader.onloadend = () => res(reader.result as string);
+        reader.readAsDataURL(blobToUpload);
+      });
+    }
+
+    if (dataUrlToSend) {
       try {
         console.log(`[Firebase Storage] Trying server-assisted proxy upload for ${path}...`);
         const response = await fetch('/api/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataUrl: dataOrFile, path })
+          body: JSON.stringify({ dataUrl: dataUrlToSend, path })
         });
         if (response.ok) {
           const resData = await response.json();
@@ -119,18 +234,16 @@ export async function uploadToFirebaseStorage(
       }
     }
 
-    // Log the exact upload error as required
+    // Log exact upload error
     console.error('[Firebase Storage Upload Error]:', {
       path,
       errorCode: clientError?.code || 'UNKNOWN',
       errorMessage: clientError?.message || String(clientError),
-      errorStack: clientError?.stack,
       rawError: clientError
     });
 
-    // Throw explicit error so publishing halts and displays user-friendly message
     throw new Error(
-      `Photo upload failed for (${path}). ${clientError?.message || 'Network/CORS error'}. Please try again.`
+      `Photo/media upload failed for (${path}). ${clientError?.message || 'Network/CORS error'}. Please try again.`
     );
   }
 }
