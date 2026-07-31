@@ -8,9 +8,10 @@ import { storage } from '../lib/firebase';
  */
 export async function uploadToFirebaseStorage(
   dataOrFile: string | File | Blob,
-  path: string
+  path: string,
+  timeoutMs = 5000
 ): Promise<string> {
-  try {
+  const uploadPromise = (async () => {
     const storageRef = ref(storage, path);
 
     if (typeof dataOrFile === 'string') {
@@ -27,8 +28,16 @@ export async function uploadToFirebaseStorage(
       const downloadUrl = await getDownloadURL(storageRef);
       return downloadUrl;
     }
+  })();
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Firebase Storage upload timed out after 5s')), timeoutMs)
+  );
+
+  try {
+    return await Promise.race([uploadPromise, timeoutPromise]);
   } catch (error) {
-    console.warn(`Firebase Storage upload to ${path} failed/skipped, falling back to original data:`, error);
+    console.warn(`Firebase Storage upload to ${path} failed/timed out, falling back to original data:`, error);
     // If input is data URL or string, return it as fallback
     if (typeof dataOrFile === 'string') {
       return dataOrFile;

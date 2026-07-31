@@ -35,7 +35,7 @@ function MainApp() {
   };
 
   const handleCardCreated = (card: FriendshipCard) => {
-    navigate(`/card/${card.id}`);
+    console.log("Card created successfully with ID:", card.id);
   };
 
   const handlePreviewCard = (card: FriendshipCard) => {
