@@ -75,10 +75,24 @@ export async function uploadToFirebaseStorage(
       }
 
       // Step 1: Execute uploadBytes
+      console.log(`[Firebase Storage Debug] Preparing uploadBytes for path: "${path}"`, {
+        storageBucket: storageRef.bucket,
+        fullPath: storageRef.fullPath,
+        isBlob: blobToUpload instanceof Blob,
+        blobSize: blobToUpload.size,
+        blobType: blobToUpload.type,
+        contentType
+      });
+
       const snapshot = await uploadBytes(storageRef, blobToUpload, { contentType });
+      console.log(`[Firebase Storage Debug] uploadBytes succeeded for "${path}"!`, {
+        refFullPath: snapshot.ref.fullPath,
+        metadataSize: snapshot.metadata?.size
+      });
 
       // Step 2: Get Download URL ONLY after uploadBytes succeeds
       const downloadUrl = await getDownloadURL(snapshot.ref);
+      console.log(`[Firebase Storage Debug] getDownloadURL succeeded for "${path}":`, downloadUrl);
       return downloadUrl;
     }, 3, 1000);
   } catch (clientError: any) {
