@@ -4,7 +4,8 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { FriendshipCard, AnalyticsStats } from './src/types';
 import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
-import { db } from './src/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from './src/lib/firebase';
 
 const app = express();
 const PORT = 3000;
@@ -287,6 +288,34 @@ function generateUniqueCardId(): string {
   }
   return id;
 }
+
+// Proxy upload endpoint to assist client when browser CORS blocks direct XMLHttpRequest
+app.post('/api/upload', async (req, res) => {
+  try {
+    const { dataUrl, path: storagePath } = req.body;
+    if (!dataUrl || !storagePath) {
+      return res.status(400).json({ success: false, error: 'Missing dataUrl or path' });
+    }
+
+    if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+      const mimeMatch = dataUrl.match(/^data:(.*?);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const base64Data = dataUrl.replace(/^data:.*?;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      const storageRef = ref(storage, storagePath);
+      const snapshot = await uploadBytes(storageRef, buffer, { contentType: mimeType });
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+
+      return res.json({ success: true, url: downloadUrl });
+    } else {
+      return res.json({ success: true, url: dataUrl });
+    }
+  } catch (err: any) {
+    console.error('Server upload error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Server upload failed' });
+  }
+});
 
 // Get all cards
 app.get('/api/cards', (req, res) => {

@@ -1,52 +1,122 @@
-import { ref, uploadString, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../lib/firebase';
 
 /**
- * Uploads a Data URL (base64 image or audio) or Blob to Firebase Storage.
- * Returns the public download URL.
- * Fallbacks to data URL if Firebase Storage is unavailable or fails.
+ * Helper function to convert a base64 Data URL to a Blob with its MIME type
+ */
+export function dataURLToBlob(dataUrl: string): { blob: Blob; mimeType: string } {
+  const arr = dataUrl.split(',');
+  const mimeMatch = arr[0].match(/:(.*?);/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const bstr = atob(arr[1] || '');
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return { blob: new Blob([u8arr], { type: mimeType }), mimeType };
+}
+
+/**
+ * Retry helper for asynchronous operations with exponential/step backoff
+ */
+async function uploadWithRetry<T>(
+  fn: (attempt: number) => Promise<T>,
+  maxRetries = 3,
+  delayMs = 1000
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Firebase Storage] Upload attempt ${attempt}/${maxRetries} failed:`, err?.message || err);
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Uploads a Data URL, File, or Blob to Firebase Storage using uploadBytes().
+ * Returns the public download URL obtained via getDownloadURL() ONLY after uploadBytes() succeeds.
+ * Logs exact errors, retries failed uploads, and throws on failure to prevent publishing broken cards.
  */
 export async function uploadToFirebaseStorage(
   dataOrFile: string | File | Blob,
-  path: string,
-  timeoutMs = 5000
+  path: string
 ): Promise<string> {
-  const uploadPromise = (async () => {
-    const storageRef = ref(storage, path);
+  if (!dataOrFile) {
+    throw new Error('No data or file provided for upload.');
+  }
 
-    if (typeof dataOrFile === 'string') {
-      if (dataOrFile.startsWith('data:')) {
-        // Upload string as data_url
-        await uploadString(storageRef, dataOrFile, 'data_url');
-        const downloadUrl = await getDownloadURL(storageRef);
-        return downloadUrl;
-      }
-      return dataOrFile; // Already an http/https URL
-    } else {
-      // Upload File or Blob
-      await uploadBytes(storageRef, dataOrFile);
-      const downloadUrl = await getDownloadURL(storageRef);
-      return downloadUrl;
-    }
-  })();
+  // Return immediately if it's already a hosted http/https URL
+  if (typeof dataOrFile === 'string' && !dataOrFile.startsWith('data:')) {
+    return dataOrFile;
+  }
 
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Firebase Storage upload timed out after 5s')), timeoutMs)
-  );
-
+  // Attempt 1: Direct client-side Firebase Storage upload using uploadBytes() with retry logic
   try {
-    return await Promise.race([uploadPromise, timeoutPromise]);
-  } catch (error) {
-    console.warn(`Firebase Storage upload to ${path} failed/timed out, falling back to original data:`, error);
-    // If input is data URL or string, return it as fallback
-    if (typeof dataOrFile === 'string') {
-      return dataOrFile;
+    return await uploadWithRetry(async () => {
+      const storageRef = ref(storage, path);
+      let blobToUpload: Blob;
+      let contentType = 'image/jpeg';
+
+      if (typeof dataOrFile === 'string') {
+        const { blob, mimeType } = dataURLToBlob(dataOrFile);
+        blobToUpload = blob;
+        contentType = mimeType;
+      } else {
+        blobToUpload = dataOrFile;
+        contentType = dataOrFile.type || 'image/jpeg';
+      }
+
+      // Step 1: Execute uploadBytes
+      const snapshot = await uploadBytes(storageRef, blobToUpload, { contentType });
+
+      // Step 2: Get Download URL ONLY after uploadBytes succeeds
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+      return downloadUrl;
+    }, 3, 1000);
+  } catch (clientError: any) {
+    console.warn(`[Firebase Storage Client Upload Failed for ${path}]:`, clientError?.message || clientError);
+
+    // Attempt 2: Server API endpoint fallback (bypasses browser CORS policy restrictions)
+    if (typeof dataOrFile === 'string' && dataOrFile.startsWith('data:')) {
+      try {
+        console.log(`[Firebase Storage] Trying server-assisted proxy upload for ${path}...`);
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataUrl: dataOrFile, path })
+        });
+        if (response.ok) {
+          const resData = await response.json();
+          if (resData.success && resData.url) {
+            console.log(`[Firebase Storage] Server-assisted upload succeeded for ${path}`);
+            return resData.url;
+          }
+        }
+      } catch (serverErr: any) {
+        console.warn(`[Firebase Storage Server Proxy Failed for ${path}]:`, serverErr?.message || serverErr);
+      }
     }
-    // If it's a File/Blob, convert to Data URL fallback
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(dataOrFile);
+
+    // Log the exact upload error as required
+    console.error('[Firebase Storage Upload Error]:', {
+      path,
+      errorCode: clientError?.code || 'UNKNOWN',
+      errorMessage: clientError?.message || String(clientError),
+      errorStack: clientError?.stack,
+      rawError: clientError
     });
+
+    // Throw explicit error so publishing halts and displays user-friendly message
+    throw new Error(
+      `Photo upload failed for (${path}). ${clientError?.message || 'Network/CORS error'}. Please try again.`
+    );
   }
 }

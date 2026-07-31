@@ -207,22 +207,35 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
   console.log("Upload complete - processing media...");
 
   // Upload photos to Firebase Storage if data URLs
-  const uploadedPhotos = await Promise.all(
-    (cardData.photos || []).map(async (photo, idx) => {
-      if (photo.url && photo.url.startsWith('data:')) {
+  const uploadedPhotos = [];
+  for (let idx = 0; idx < (cardData.photos || []).length; idx++) {
+    const photo = cardData.photos![idx];
+    if (photo.url && photo.url.startsWith('data:')) {
+      try {
         const path = `cards/${id}/photos/photo_${idx}_${Date.now()}.jpg`;
+        console.log(`[Firebase Storage] Uploading photo ${idx + 1}/${cardData.photos!.length}...`);
         const firestoreStorageUrl = await uploadToFirebaseStorage(photo.url, path);
-        return { ...photo, url: firestoreStorageUrl };
+        uploadedPhotos.push({ ...photo, url: firestoreStorageUrl });
+      } catch (err: any) {
+        console.error(`[Firebase Storage Upload Failed] Photo #${idx + 1}:`, err);
+        throw new Error(`Photo upload failed for Photo #${idx + 1}: ${err?.message || 'Upload error'}. Publishing aborted.`);
       }
-      return photo;
-    })
-  );
+    } else {
+      uploadedPhotos.push(photo);
+    }
+  }
 
   // Upload custom audio to Firebase Storage if data URL
   let customAudioUrl = cardData.customAudioUrl || '';
   if (customAudioUrl && customAudioUrl.startsWith('data:')) {
-    const audioPath = `cards/${id}/music/custom_audio_${Date.now()}.mp3`;
-    customAudioUrl = await uploadToFirebaseStorage(customAudioUrl, audioPath);
+    try {
+      const audioPath = `cards/${id}/music/custom_audio_${Date.now()}.mp3`;
+      console.log(`[Firebase Storage] Uploading custom audio track...`);
+      customAudioUrl = await uploadToFirebaseStorage(customAudioUrl, audioPath);
+    } catch (err: any) {
+      console.error('[Firebase Storage Upload Failed] Custom audio:', err);
+      throw new Error(`Audio upload failed: ${err?.message || 'Upload error'}. Publishing aborted.`);
+    }
   }
 
   const mainPhotoUrl = uploadedPhotos[0]?.url || cardData.friendPhotoUrl || '';

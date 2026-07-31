@@ -24,7 +24,8 @@ import {
   Play,
   CheckCircle2,
   Image as ImageIcon,
-  ShieldCheck
+  ShieldCheck,
+  AlertTriangle
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
@@ -126,6 +127,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
   // Modals & UI helpers
   const [isEmojiOpen, setIsEmojiOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [createdCard, setCreatedCard] = useState<FriendshipCard | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -224,6 +226,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
     }
 
     setIsSubmitting(true);
+    setUploadError(null);
     console.log("Saving...");
     try {
       console.log("Upload complete");
@@ -247,7 +250,8 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
       }
     } catch (err: any) {
       console.error('Error publishing card:', err);
-      alert(err?.message || 'Failed to save card to Firebase. Please check your network connection and try again.');
+      const errorMessage = err?.message || 'Media upload failed. Please verify your photo/network and try again.';
+      setUploadError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -689,6 +693,23 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
               </div>
             )}
           </div>
+
+          {uploadError && (
+            <div className="mb-6 p-4 bg-rose-950/60 border border-rose-500/50 rounded-2xl text-left flex items-start gap-3 shadow-lg">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold text-rose-200 uppercase tracking-wider mb-1">
+                  Upload Error
+                </h4>
+                <p className="text-xs text-rose-300 leading-relaxed mb-2">
+                  {uploadError}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Please check your internet connection or try re-selecting your photos.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row gap-3">
             <button
