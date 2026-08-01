@@ -3,9 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { FriendshipCard, AnalyticsStats } from './src/types';
-import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from './src/lib/firebase';
+import { supabase } from './src/lib/supabase';
+import { parseSupabaseBucketAndPath } from './src/services/storageService';
 
 const app = express();
 const PORT = 3000;
@@ -48,76 +47,14 @@ const saveCardsLocal = () => {
   }
 };
 
-// Helper to save card to Firebase Firestore
-const saveCardToFirestore = async (card: FriendshipCard) => {
-  try {
-    await setDoc(doc(db, 'cards', card.id), card, { merge: true });
-
-    // Also persist to agreements/certificates collections if completed
-    if (card.status === 'signed') {
-      const agreementId = card.agreementId || `${card.id}_AGR`;
-      await setDoc(doc(db, 'agreements', agreementId), {
-        id: agreementId,
-        cardId: card.id,
-        agreementNumber: card.agreementNumber,
-        senderName: card.senderName,
-        friendName: card.friendName,
-        signedAt: card.signedAt || new Date().toISOString(),
-        recipientSignature: card.recipientSignature || null
-      }, { merge: true });
-
-      const certId = card.certificateId || `CERT-${card.agreementNumber}`;
-      await setDoc(doc(db, 'certificates', certId), {
-        id: certId,
-        cardId: card.id,
-        certificateNumber: card.agreementNumber,
-        friendName: card.friendName,
-        senderName: card.senderName,
-        issuedAt: card.signedAt || new Date().toISOString()
-      }, { merge: true });
-    }
-  } catch (err) {
-    console.error(`Firebase save error for card ${card.id}:`, err);
-  }
-};
-
-// Helper to delete card from Firestore
-const deleteCardFromFirestore = async (cardId: string) => {
-  try {
-    await deleteDoc(doc(db, 'cards', cardId));
-  } catch (err) {
-    console.error(`Firebase delete error for card ${cardId}:`, err);
-  }
-};
-
-// Load cards from Firestore at startup
-const loadCardsFromFirestore = async () => {
-  try {
-    const querySnapshot = await getDocs(collection(db, 'cards'));
-    querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as FriendshipCard;
-      if (data && data.id) {
-        cardsStore[data.id] = data;
-      }
-    });
-    saveCardsLocal();
-    console.log(`Loaded ${querySnapshot.size} cards from Firebase Firestore database.`);
-  } catch (err) {
-    console.error('Firebase initial load error, using local cache:', err);
-  }
-};
-
-// Initial trigger to load Firestore database
-loadCardsFromFirestore();
-
-// Default initial commitments if none provided
+// Default initial commitments
 const DEFAULT_COMMITMENTS = [
   {
     id: 'c1',
     number: 1,
     icon: 'Sparkles',
     title: 'The Years of Growth Pact',
-    description: 'To celebrate each other’s victories, big or small, and stand as an unshakeable pillars through life’s unpredictable turns.',
+    description: 'To celebrate each other’s victories, big or small, and stand as an unshakeable pillar through life’s unpredictable turns.',
     accentColor: '#f59e0b'
   },
   {
@@ -146,7 +83,141 @@ const DEFAULT_COMMITMENTS = [
   }
 ];
 
-// Populate sample cards if empty for instant preview & demonstration
+// Map Supabase DB row to FriendshipCard object
+const mapRowToCard = (row: any): FriendshipCard => {
+  const openingConfig = row.opening_config || {};
+  const photos = Array.isArray(row.photos) ? row.photos : [];
+  return {
+    id: row.id || row.share_id,
+    agreementId: row.agreement_id || `${row.id}_AGR`,
+    certificateId: row.certificate_id || `CERT-${row.share_id}`,
+    themeId: row.theme || 'friendship',
+    friendName: row.receiver_name || '',
+    friendNickname: openingConfig.friendNickname || '',
+    senderName: row.sender_name || '',
+    customMessage: row.custom_message || '',
+    friendPhotoUrl: photos[0]?.url || '',
+    photos: photos,
+    openingConfig: {
+      openingHeading: openingConfig.openingHeading || `Hey ${row.receiver_name || 'Friend'}...`,
+      openingMessage: openingConfig.openingMessage || row.custom_message || 'To a truly irreplaceable friend.',
+      messageStyle: openingConfig.messageStyle || 'best_friends',
+      typingSpeed: openingConfig.typingSpeed || 'normal',
+      textAnimation: openingConfig.textAnimation || 'typewriter',
+      backgroundEffect: openingConfig.backgroundEffect || 'sparkles',
+      musicTiming: openingConfig.musicTiming || 'immediately',
+      continueButtonText: openingConfig.continueButtonText || 'Unbox Memories'
+    },
+    commitmentsTitle: openingConfig.commitmentsTitle || 'OUR UNBREAKABLE PACT',
+    commitments: Array.isArray(row.commitments) && row.commitments.length > 0 ? row.commitments : DEFAULT_COMMITMENTS,
+    musicType: row.music_url?.startsWith('http') ? 'custom' : 'preset',
+    presetAudioTrack: row.music_url?.startsWith('http') ? undefined : (row.music_url || 'Acoustic Nostalgia (Warm Guitar & Piano)'),
+    customAudioUrl: row.music_url?.startsWith('http') ? row.music_url : '',
+    audioSettings: openingConfig.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
+    senderSignature: row.sender_signature || { type: 'type', typedName: row.sender_name, signedAt: row.created_at },
+    recipientSignature: row.recipient_signature || undefined,
+    status: row.status || 'published',
+    agreementNumber: row.share_id ? `FDA-2026-${row.share_id.slice(0, 4)}` : 'FDA-2026-8942',
+    location: openingConfig.location || 'Special Moments',
+    createdAt: row.created_at || new Date().toISOString(),
+    signedAt: row.recipient_signature?.signedAt || undefined,
+    viewsCount: row.views || 1,
+    downloadsCount: row.downloads || 0,
+    shareAnalytics: row.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
+    agreementPdf: row.agreement_pdf || '',
+    agreementPng: row.agreement_png || '',
+    certificatePdf: row.certificate_pdf || '',
+    certificatePng: row.certificate_png || '',
+    visitorLogs: row.visitor_logs || []
+  };
+};
+
+// Helper to save card to Supabase
+const saveCardToSupabase = async (card: FriendshipCard) => {
+  try {
+    const row = {
+      id: card.id,
+      share_id: card.id,
+      sender_name: card.senderName,
+      receiver_name: card.friendName,
+      theme: card.themeId || 'friendship',
+      opening_config: {
+        ...card.openingConfig,
+        friendNickname: card.friendNickname,
+        commitmentsTitle: card.commitmentsTitle,
+        audioSettings: card.audioSettings,
+        location: card.location
+      },
+      custom_message: card.customMessage,
+      commitments: card.commitments || [],
+      photos: card.photos || [],
+      music_url: card.customAudioUrl || card.presetAudioTrack || '',
+      agreement_pdf: card.agreementPdf || '',
+      agreement_png: card.agreementPng || '',
+      certificate_pdf: card.certificatePdf || '',
+      certificate_png: card.certificatePng || '',
+      sender_signature: card.senderSignature,
+      recipient_signature: card.recipientSignature || null,
+      created_at: card.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      status: card.status || 'published'
+    };
+
+    await supabase.from('experiences').upsert(row);
+
+    if (card.status === 'signed') {
+      const agreementId = card.agreementId || `${card.id}_AGR`;
+      await supabase.from('agreements').upsert({
+        id: agreementId,
+        experience_id: card.id,
+        signed_at: card.signedAt || new Date().toISOString()
+      });
+
+      const certId = card.certificateId || `CERT-${card.agreementNumber}`;
+      await supabase.from('certificates').upsert({
+        id: certId,
+        experience_id: card.id,
+        certificate_png: card.certificateImageDataUrl || card.certificatePng || '',
+        issued_at: card.signedAt || new Date().toISOString()
+      });
+    }
+  } catch (err) {
+    console.error(`Supabase save error for card ${card.id}:`, err);
+  }
+};
+
+// Helper to delete card from Supabase
+const deleteCardFromSupabase = async (cardId: string) => {
+  try {
+    await supabase.from('experiences').delete().or(`id.eq.${cardId},share_id.eq.${cardId}`);
+  } catch (err) {
+    console.error(`Supabase delete error for card ${cardId}:`, err);
+  }
+};
+
+// Load cards from Supabase at startup
+const loadCardsFromSupabase = async () => {
+  try {
+    const { data, error } = await supabase.from('experiences').select('*');
+    if (data && !error) {
+      data.forEach((row) => {
+        if (row && row.id) {
+          const card = mapRowToCard(row);
+          cardsStore[card.id] = card;
+        }
+      });
+      saveCardsLocal();
+      console.log(`Loaded ${data.length} cards from Supabase PostgreSQL database.`);
+    }
+  } catch (err) {
+    console.error('Supabase initial load error, using local cache:', err);
+  }
+};
+
+// Initial trigger to load Supabase database
+loadCardsFromSupabase();
+
+// Populate sample card if empty
 if (Object.keys(cardsStore).length === 0) {
   const sampleCard1: FriendshipCard = {
     id: 'sample-alex-sam',
@@ -199,82 +270,21 @@ if (Object.keys(cardsStore).length === 0) {
     status: 'published',
     agreementNumber: 'FDA-2026-8942',
     location: 'San Francisco, CA',
-    viewsCount: 142,
-    downloadsCount: 18,
-    shareAnalytics: { whatsapp: 12, telegram: 4, directCopy: 21 },
-    visitorLogs: [
-      { timestamp: new Date().toISOString(), userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)' }
-    ],
-    createdAt: new Date().toISOString()
-  };
-
-  const sampleCard2: FriendshipCard = {
-    id: 'sample-maya-birthday',
-    agreementId: 'sample-maya-birthday-AGR',
-    certificateId: 'CERT-FDA-2026-5510',
-    themeId: 'birthday',
-    friendName: 'Maya Lin',
-    friendNickname: 'May-May',
-    senderName: 'Jordan Lee',
-    customMessage: 'Happy Birthday to the brightest star in every room! May this year bring endless cake, zero stress, and unlimited laughs!',
-    friendPhotoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80',
-    photos: [
-      {
-        id: 'p1',
-        url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80',
-        caption: 'Birthday Surprise Blast',
-        date: '2025-05-12',
-        location: 'New York City'
-      },
-      {
-        id: 'p2',
-        url: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=800&q=80',
-        caption: 'Summer Beach Escape',
-        date: '2025-07-04',
-        location: 'Hamptons'
-      }
-    ],
-    commitmentsTitle: 'OUR UNBREAKABLE PACT',
-    commitments: DEFAULT_COMMITMENTS,
-    musicType: 'preset',
-    presetAudioTrack: 'Uplifting Festive Beats (Fun & Upbeat)',
-    audioSettings: {
-      autoplay: true,
-      loop: true,
-      volume: 0.6,
-      fadeIn: true
+    createdAt: new Date().toISOString(),
+    viewsCount: 1,
+    downloadsCount: 0,
+    shareAnalytics: {
+      whatsapp: 0,
+      telegram: 0,
+      facebook: 0,
+      directCopy: 0
     },
-    senderSignature: {
-      type: 'type',
-      typedName: 'Jordan Lee',
-      signedAt: new Date().toISOString()
-    },
-    recipientSignature: {
-      type: 'type',
-      typedName: 'Maya Lin',
-      signedAt: new Date().toISOString()
-    },
-    status: 'signed',
-    agreementNumber: 'FDA-2026-5510',
-    location: 'New York, NY',
-    viewsCount: 298,
-    downloadsCount: 34,
-    shareAnalytics: { whatsapp: 28, telegram: 9, directCopy: 45 },
-    visitorLogs: [
-      { timestamp: new Date().toISOString(), userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' }
-    ],
-    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-    signedAt: new Date(Date.now() - 86400000 * 2).toISOString()
+    visitorLogs: []
   };
 
   cardsStore[sampleCard1.id] = sampleCard1;
-  cardsStore[sampleCard2.id] = sampleCard2;
   saveCardsLocal();
-  saveCardToFirestore(sampleCard1);
-  saveCardToFirestore(sampleCard2);
 }
-
-// API ROUTES BEFORE VITE MIDDLEWARE
 
 function generateUniqueCardId(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -289,7 +299,7 @@ function generateUniqueCardId(): string {
   return id;
 }
 
-// Proxy upload endpoint to assist client when browser CORS blocks direct XMLHttpRequest
+// Proxy upload endpoint to assist client with Supabase Storage upload
 app.post('/api/upload', async (req, res) => {
   try {
     const { dataUrl, path: storagePath } = req.body;
@@ -297,23 +307,69 @@ app.post('/api/upload', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing dataUrl or path' });
     }
 
+    const { bucket, filePath } = parseSupabaseBucketAndPath(storagePath);
+    const serverSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || (supabase as any)?.supabaseUrl || 'https://placeholder.supabase.co';
+
+    console.log('[Server Storage Upload Trace]', {
+      bucket,
+      filePath,
+      storagePath,
+      serverSupabaseUrl
+    });
+
     if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
       const mimeMatch = dataUrl.match(/^data:(.*?);base64,/);
       const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
       const base64Data = dataUrl.replace(/^data:.*?;base64,/, '');
       const buffer = Buffer.from(base64Data, 'base64');
 
-      const storageRef = ref(storage, storagePath);
-      const snapshot = await uploadBytes(storageRef, buffer, { contentType: mimeType });
-      const downloadUrl = await getDownloadURL(snapshot.ref);
+      if (serverSupabaseUrl && !serverSupabaseUrl.includes('placeholder')) {
+        try {
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, buffer, {
+              contentType: mimeType,
+              upsert: true
+            });
 
-      return res.json({ success: true, url: downloadUrl });
+          console.log('[Server Supabase upload() Response]:', { uploadData, uploadErr });
+
+          if (!uploadErr) {
+            const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+            console.log('[Server Supabase Public URL]:', publicUrlData.publicUrl);
+            return res.json({ success: true, url: publicUrlData.publicUrl });
+          } else {
+            console.error('[Server Supabase Storage Error Object]:', uploadErr);
+          }
+        } catch (sbErr) {
+          console.error('[Server Supabase Storage Exception]:', sbErr);
+        }
+      }
+
+      // Local fallback on server disk if Supabase is unconfigured or unavailable
+      const ext = mimeType.split('/')[1] || 'jpg';
+      const localFileName = `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+      const localFilePath = path.join(DATA_DIR, localFileName);
+      fs.writeFileSync(localFilePath, buffer);
+      const localUrl = `/api/media/${localFileName}`;
+      console.log(`[Server Storage Fallback] Saved locally to ${localUrl}`);
+      return res.json({ success: true, url: localUrl });
     } else {
       return res.json({ success: true, url: dataUrl });
     }
   } catch (err: any) {
     console.error('Server upload error:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Server upload failed' });
+  }
+});
+
+// Serve uploaded local media fallback files
+app.get('/api/media/:fileId', (req, res) => {
+  const filePath = path.join(DATA_DIR, req.params.fileId);
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: 'Media file not found' });
   }
 });
 
@@ -394,7 +450,7 @@ app.post('/api/cards', async (req, res) => {
 
     cardsStore[id] = newCard;
     saveCardsLocal();
-    await saveCardToFirestore(newCard);
+    await saveCardToSupabase(newCard);
 
     res.json({ success: true, card: newCard });
   } catch (err: any) {
@@ -417,7 +473,7 @@ app.get('/api/cards/:id', async (req, res) => {
     userAgent: req.headers['user-agent'] || 'Unknown'
   });
   saveCardsLocal();
-  saveCardToFirestore(card);
+  saveCardToSupabase(card);
 
   res.json({ success: true, card });
 });
@@ -428,7 +484,7 @@ app.post('/api/cards/:id/download', async (req, res) => {
   if (card) {
     card.downloadsCount = (card.downloadsCount || 0) + 1;
     saveCardsLocal();
-    saveCardToFirestore(card);
+    saveCardToSupabase(card);
     return res.json({ success: true, downloadsCount: card.downloadsCount });
   }
   res.status(404).json({ success: false, error: 'Card not found' });
@@ -447,7 +503,7 @@ app.post('/api/cards/:id/share', async (req, res) => {
     else if (channel === 'directCopy') card.shareAnalytics.directCopy++;
 
     saveCardsLocal();
-    saveCardToFirestore(card);
+    saveCardToSupabase(card);
     return res.json({ success: true, shareAnalytics: card.shareAnalytics });
   }
   res.status(404).json({ success: false, error: 'Card not found' });
@@ -472,7 +528,7 @@ app.post('/api/cards/:id/sign', async (req, res) => {
     card.certificateImageDataUrl = certificateImageDataUrl;
   }
   saveCardsLocal();
-  await saveCardToFirestore(card);
+  await saveCardToSupabase(card);
 
   res.json({ success: true, card });
 });
@@ -483,7 +539,7 @@ app.delete('/api/cards/:id', async (req, res) => {
   if (cardsStore[cardId]) {
     delete cardsStore[cardId];
     saveCardsLocal();
-    await deleteCardFromFirestore(cardId);
+    await deleteCardFromSupabase(cardId);
     return res.json({ success: true, message: 'Card deleted successfully.' });
   }
   res.status(404).json({ success: false, error: 'Card not found.' });
@@ -574,10 +630,8 @@ app.get('/api/analytics', (req, res) => {
     themeBreakdown: themeBreakdown as any
   };
 
-  // Return full card objects for hidden admin view so Sonu can inspect agreements, certificates, photos, audio, shares, downloads & details
   res.json({ success: true, stats, allCardsDetail: allCards });
 });
-
 
 // VITE MIDDLEWARE / PRODUCTION STATIC SERVING
 async function startServer() {

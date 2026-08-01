@@ -105,6 +105,10 @@ export interface FriendshipCard {
   shareAnalytics: ShareAnalytics;
   visitorLogs: VisitorLog[];
   certificateImageDataUrl?: string;
+  agreementPdf?: string;
+  agreementPng?: string;
+  certificatePdf?: string;
+  certificatePng?: string;
   createdAt: string;
   signedAt?: string;
 }
@@ -120,4 +124,3 @@ export interface AnalyticsStats {
   shareAnalyticsBreakdown?: ShareAnalytics;
   visitorLogs?: VisitorLog[];
 }
-
