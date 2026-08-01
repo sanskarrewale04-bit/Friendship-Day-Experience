@@ -3,8 +3,19 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { FriendshipCard, AnalyticsStats } from './src/types';
-import { supabase } from './src/lib/supabase';
-import { parseSupabaseBucketAndPath } from './src/services/storageService';
+import { db, storage } from './src/lib/firebase';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  orderBy
+} from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 const app = express();
 const PORT = 3000;
@@ -83,24 +94,27 @@ const DEFAULT_COMMITMENTS = [
   }
 ];
 
-// Map Supabase DB row to FriendshipCard object
-const mapRowToCard = (row: any): FriendshipCard => {
-  const openingConfig = row.opening_config || {};
-  const photos = Array.isArray(row.photos) ? row.photos : [];
+// Map Firestore doc to FriendshipCard object
+const mapDocToCard = (data: any, docId: string): FriendshipCard => {
+  const openingConfig = data.openingConfig || data.opening_config || {};
+  const photos = Array.isArray(data.photos) ? data.photos : [];
+  const receiverName = data.receiverName || data.friendName || '';
+  const senderName = data.senderName || data.sender_name || '';
+
   return {
-    id: row.id || row.share_id,
-    agreementId: row.agreement_id || `${row.id}_AGR`,
-    certificateId: row.certificate_id || `CERT-${row.share_id}`,
-    themeId: row.theme || 'friendship',
-    friendName: row.receiver_name || '',
-    friendNickname: openingConfig.friendNickname || '',
-    senderName: row.sender_name || '',
-    customMessage: row.custom_message || '',
-    friendPhotoUrl: photos[0]?.url || '',
+    id: data.shareId || data.id || docId,
+    agreementId: data.agreementId || `${docId}_AGR`,
+    certificateId: data.certificateId || `CERT-${data.shareId || docId}`,
+    themeId: data.theme || data.themeId || 'friendship',
+    friendName: receiverName,
+    friendNickname: openingConfig.friendNickname || data.friendNickname || '',
+    senderName: senderName,
+    customMessage: data.customMessage || data.custom_message || '',
+    friendPhotoUrl: photos[0]?.url || data.friendPhotoUrl || '',
     photos: photos,
     openingConfig: {
-      openingHeading: openingConfig.openingHeading || `Hey ${row.receiver_name || 'Friend'}...`,
-      openingMessage: openingConfig.openingMessage || row.custom_message || 'To a truly irreplaceable friend.',
+      openingHeading: openingConfig.openingHeading || `Hey ${receiverName || 'Friend'}...`,
+      openingMessage: openingConfig.openingMessage || data.customMessage || 'To a truly irreplaceable friend.',
       messageStyle: openingConfig.messageStyle || 'best_friends',
       typingSpeed: openingConfig.typingSpeed || 'normal',
       textAnimation: openingConfig.textAnimation || 'typewriter',
@@ -108,114 +122,100 @@ const mapRowToCard = (row: any): FriendshipCard => {
       musicTiming: openingConfig.musicTiming || 'immediately',
       continueButtonText: openingConfig.continueButtonText || 'Unbox Memories'
     },
-    commitmentsTitle: openingConfig.commitmentsTitle || 'OUR UNBREAKABLE PACT',
-    commitments: Array.isArray(row.commitments) && row.commitments.length > 0 ? row.commitments : DEFAULT_COMMITMENTS,
-    musicType: row.music_url?.startsWith('http') ? 'custom' : 'preset',
-    presetAudioTrack: row.music_url?.startsWith('http') ? undefined : (row.music_url || 'Acoustic Nostalgia (Warm Guitar & Piano)'),
-    customAudioUrl: row.music_url?.startsWith('http') ? row.music_url : '',
-    audioSettings: openingConfig.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
-    senderSignature: row.sender_signature || { type: 'type', typedName: row.sender_name, signedAt: row.created_at },
-    recipientSignature: row.recipient_signature || undefined,
-    status: row.status || 'published',
-    agreementNumber: row.share_id ? `FDA-2026-${row.share_id.slice(0, 4)}` : 'FDA-2026-8942',
-    location: openingConfig.location || 'Special Moments',
-    createdAt: row.created_at || new Date().toISOString(),
-    signedAt: row.recipient_signature?.signedAt || undefined,
-    viewsCount: row.views || 1,
-    downloadsCount: row.downloads || 0,
-    shareAnalytics: row.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
-    agreementPdf: row.agreement_pdf || '',
-    agreementPng: row.agreement_png || '',
-    certificatePdf: row.certificate_pdf || '',
-    certificatePng: row.certificate_png || '',
-    visitorLogs: row.visitor_logs || []
+    commitmentsTitle: openingConfig.commitmentsTitle || data.commitmentsTitle || 'OUR UNBREAKABLE PACT',
+    commitments: Array.isArray(data.commitments) && data.commitments.length > 0 ? data.commitments : DEFAULT_COMMITMENTS,
+    musicType: (data.music || data.customAudioUrl)?.startsWith('http') ? 'custom' : 'preset',
+    presetAudioTrack: (data.music || data.customAudioUrl)?.startsWith('http') ? undefined : (data.music || data.presetAudioTrack || 'Acoustic Nostalgia (Warm Guitar & Piano)'),
+    customAudioUrl: (data.music || data.customAudioUrl)?.startsWith('http') ? (data.music || data.customAudioUrl) : '',
+    audioSettings: openingConfig.audioSettings || data.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
+    senderSignature: data.senderSignature || { type: 'type', typedName: senderName, signedAt: data.createdAt },
+    recipientSignature: data.recipientSignature || data.receiverSignature || undefined,
+    status: data.status || 'published',
+    agreementNumber: data.shareId ? `FDA-2026-${data.shareId.slice(0, 4)}` : 'FDA-2026-8942',
+    location: openingConfig.location || data.location || 'Special Moments',
+    createdAt: data.createdAt || new Date().toISOString(),
+    signedAt: (data.recipientSignature || data.receiverSignature)?.signedAt || data.signedAt || undefined,
+    viewsCount: data.viewsCount || data.views || 1,
+    downloadsCount: data.downloadsCount || data.downloads || 0,
+    shareAnalytics: data.shareAnalytics || data.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
+    agreementPdf: data.agreementPDF || data.agreement_pdf || '',
+    agreementPng: data.agreementPNG || data.agreement_png || '',
+    certificatePdf: data.certificatePDF || data.certificate_pdf || '',
+    certificatePng: data.certificatePNG || data.certificate_png || '',
+    visitorLogs: data.visitorLogs || []
   };
 };
 
-// Helper to save card to Supabase
-const saveCardToSupabase = async (card: FriendshipCard) => {
+// Save card to Firestore helper
+const saveCardToFirestore = async (card: FriendshipCard) => {
   try {
-    const row = {
+    const docData = {
       id: card.id,
-      share_id: card.id,
-      sender_name: card.senderName,
-      receiver_name: card.friendName,
+      shareId: card.id,
+      senderName: card.senderName,
+      receiverName: card.friendName,
       theme: card.themeId || 'friendship',
-      opening_config: {
+      openingConfig: {
         ...card.openingConfig,
         friendNickname: card.friendNickname,
         commitmentsTitle: card.commitmentsTitle,
         audioSettings: card.audioSettings,
         location: card.location
       },
-      custom_message: card.customMessage,
+      customMessage: card.customMessage,
       commitments: card.commitments || [],
       photos: card.photos || [],
-      music_url: card.customAudioUrl || card.presetAudioTrack || '',
-      agreement_pdf: card.agreementPdf || '',
-      agreement_png: card.agreementPng || '',
-      certificate_pdf: card.certificatePdf || '',
-      certificate_png: card.certificatePng || '',
-      sender_signature: card.senderSignature,
-      recipient_signature: card.recipientSignature || null,
-      created_at: card.createdAt || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      music: card.customAudioUrl || card.presetAudioTrack || '',
+      agreementPDF: card.agreementPdf || '',
+      agreementPNG: card.agreementPng || '',
+      certificatePDF: card.certificatePdf || '',
+      certificatePNG: card.certificatePng || '',
+      senderSignature: card.senderSignature,
+      receiverSignature: card.recipientSignature || null,
+      createdAt: card.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      published: true,
       status: card.status || 'published'
     };
 
-    await supabase.from('experiences').upsert(row);
+    const expRef = doc(db, 'experiences', card.id);
+    await setDoc(expRef, docData, { merge: true });
 
-    if (card.status === 'signed') {
-      const agreementId = card.agreementId || `${card.id}_AGR`;
-      await supabase.from('agreements').upsert({
-        id: agreementId,
-        experience_id: card.id,
-        signed_at: card.signedAt || new Date().toISOString()
-      });
-
-      const certId = card.certificateId || `CERT-${card.agreementNumber}`;
-      await supabase.from('certificates').upsert({
-        id: certId,
-        experience_id: card.id,
-        certificate_png: card.certificateImageDataUrl || card.certificatePng || '',
-        issued_at: card.signedAt || new Date().toISOString()
-      });
-    }
+    const cardRef = doc(db, 'cards', card.id);
+    await setDoc(cardRef, docData, { merge: true });
   } catch (err) {
-    console.error(`Supabase save error for card ${card.id}:`, err);
+    console.error(`Firestore save error for card ${card.id}:`, err);
   }
 };
 
-// Helper to delete card from Supabase
-const deleteCardFromSupabase = async (cardId: string) => {
+// Delete card from Firestore helper
+const deleteCardFromFirestore = async (cardId: string) => {
   try {
-    await supabase.from('experiences').delete().or(`id.eq.${cardId},share_id.eq.${cardId}`);
+    await deleteDoc(doc(db, 'experiences', cardId)).catch(() => {});
+    await deleteDoc(doc(db, 'cards', cardId)).catch(() => {});
   } catch (err) {
-    console.error(`Supabase delete error for card ${cardId}:`, err);
+    console.error(`Firestore delete error for card ${cardId}:`, err);
   }
 };
 
-// Load cards from Supabase at startup
-const loadCardsFromSupabase = async () => {
+// Load cards from Firestore at startup
+const loadCardsFromFirestore = async () => {
   try {
-    const { data, error } = await supabase.from('experiences').select('*');
-    if (data && !error) {
-      data.forEach((row) => {
-        if (row && row.id) {
-          const card = mapRowToCard(row);
-          cardsStore[card.id] = card;
-        }
+    const querySnap = await getDocs(collection(db, 'experiences'));
+    if (!querySnap.empty) {
+      querySnap.docs.forEach((docSnap) => {
+        const card = mapDocToCard(docSnap.data(), docSnap.id);
+        cardsStore[card.id] = card;
       });
       saveCardsLocal();
-      console.log(`Loaded ${data.length} cards from Supabase PostgreSQL database.`);
+      console.log(`Loaded ${querySnap.size} cards from Firestore experiences collection.`);
     }
   } catch (err) {
-    console.error('Supabase initial load error, using local cache:', err);
+    console.error('Firestore initial load error, using local cache:', err);
   }
 };
 
-// Initial trigger to load Supabase database
-loadCardsFromSupabase();
+loadCardsFromFirestore();
 
 // Populate sample card if empty
 if (Object.keys(cardsStore).length === 0) {
@@ -299,7 +299,7 @@ function generateUniqueCardId(): string {
   return id;
 }
 
-// Proxy upload endpoint to assist client with Supabase Storage upload
+// Proxy upload endpoint to assist client with Firebase Storage upload
 app.post('/api/upload', async (req, res) => {
   try {
     const { dataUrl, path: storagePath } = req.body;
@@ -307,69 +307,50 @@ app.post('/api/upload', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing dataUrl or path' });
     }
 
-    const { bucket, filePath } = parseSupabaseBucketAndPath(storagePath);
-    const serverSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || (supabase as any)?.supabaseUrl || 'https://placeholder.supabase.co';
-
-    console.log('[Server Storage Upload Trace]', {
-      bucket,
-      filePath,
-      storagePath,
-      serverSupabaseUrl
-    });
-
     if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
       const mimeMatch = dataUrl.match(/^data:(.*?);base64,/);
       const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
       const base64Data = dataUrl.replace(/^data:.*?;base64,/, '');
       const buffer = Buffer.from(base64Data, 'base64');
 
-      if (serverSupabaseUrl && !serverSupabaseUrl.includes('placeholder')) {
-        try {
-          const { data: uploadData, error: uploadErr } = await supabase.storage
-            .from(bucket)
-            .upload(filePath, buffer, {
-              contentType: mimeType,
-              upsert: true
-            });
+      try {
+        const storageRef = ref(storage, storagePath);
+        const uploadTask = uploadBytesResumable(storageRef, buffer, { contentType: mimeType });
 
-          console.log('[Server Supabase upload() Response]:', { uploadData, uploadErr });
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', null, reject, resolve);
+        });
 
-          if (!uploadErr) {
-            const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
-            console.log('[Server Supabase Public URL]:', publicUrlData.publicUrl);
-            return res.json({ success: true, url: publicUrlData.publicUrl });
-          } else {
-            console.error('[Server Supabase Storage Error Object]:', uploadErr);
-          }
-        } catch (sbErr) {
-          console.error('[Server Supabase Storage Exception]:', sbErr);
-        }
+        const publicUrl = await getDownloadURL(uploadTask.snapshot.ref);
+        return res.json({ success: true, url: publicUrl });
+      } catch (fbErr: any) {
+        console.warn('Firebase Storage upload in proxy failed, saving to local uploads folder:', fbErr?.message || fbErr);
+        const ext = mimeType.split('/')[1] || 'jpg';
+        const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+        const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+        if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        const filePath = path.join(UPLOADS_DIR, fileId);
+        fs.writeFileSync(filePath, buffer);
+        const localUrl = `/api/uploads/${fileId}`;
+        return res.json({ success: true, url: localUrl });
       }
-
-      // Local fallback on server disk if Supabase is unconfigured or unavailable
-      const ext = mimeType.split('/')[1] || 'jpg';
-      const localFileName = `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-      const localFilePath = path.join(DATA_DIR, localFileName);
-      fs.writeFileSync(localFilePath, buffer);
-      const localUrl = `/api/media/${localFileName}`;
-      console.log(`[Server Storage Fallback] Saved locally to ${localUrl}`);
-      return res.json({ success: true, url: localUrl });
     } else {
       return res.json({ success: true, url: dataUrl });
     }
   } catch (err: any) {
-    console.error('Server upload error:', err);
+    console.error('Server upload proxy error:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Server upload failed' });
   }
 });
 
-// Serve uploaded local media fallback files
-app.get('/api/media/:fileId', (req, res) => {
-  const filePath = path.join(DATA_DIR, req.params.fileId);
+// Serve uploaded media files fallback
+app.get('/api/uploads/:fileId', (req, res) => {
+  const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+  const filePath = path.join(UPLOADS_DIR, req.params.fileId);
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {
-    res.status(404).json({ error: 'Media file not found' });
+    res.status(404).json({ error: 'Upload file not found' });
   }
 });
 
@@ -450,7 +431,7 @@ app.post('/api/cards', async (req, res) => {
 
     cardsStore[id] = newCard;
     saveCardsLocal();
-    await saveCardToSupabase(newCard);
+    await saveCardToFirestore(newCard);
 
     res.json({ success: true, card: newCard });
   } catch (err: any) {
@@ -473,7 +454,7 @@ app.get('/api/cards/:id', async (req, res) => {
     userAgent: req.headers['user-agent'] || 'Unknown'
   });
   saveCardsLocal();
-  saveCardToSupabase(card);
+  saveCardToFirestore(card);
 
   res.json({ success: true, card });
 });
@@ -484,7 +465,7 @@ app.post('/api/cards/:id/download', async (req, res) => {
   if (card) {
     card.downloadsCount = (card.downloadsCount || 0) + 1;
     saveCardsLocal();
-    saveCardToSupabase(card);
+    saveCardToFirestore(card);
     return res.json({ success: true, downloadsCount: card.downloadsCount });
   }
   res.status(404).json({ success: false, error: 'Card not found' });
@@ -503,7 +484,7 @@ app.post('/api/cards/:id/share', async (req, res) => {
     else if (channel === 'directCopy') card.shareAnalytics.directCopy++;
 
     saveCardsLocal();
-    saveCardToSupabase(card);
+    saveCardToFirestore(card);
     return res.json({ success: true, shareAnalytics: card.shareAnalytics });
   }
   res.status(404).json({ success: false, error: 'Card not found' });
@@ -528,7 +509,7 @@ app.post('/api/cards/:id/sign', async (req, res) => {
     card.certificateImageDataUrl = certificateImageDataUrl;
   }
   saveCardsLocal();
-  await saveCardToSupabase(card);
+  await saveCardToFirestore(card);
 
   res.json({ success: true, card });
 });
@@ -539,7 +520,7 @@ app.delete('/api/cards/:id', async (req, res) => {
   if (cardsStore[cardId]) {
     delete cardsStore[cardId];
     saveCardsLocal();
-    await deleteCardFromSupabase(cardId);
+    await deleteCardFromFirestore(cardId);
     return res.json({ success: true, message: 'Card deleted successfully.' });
   }
   res.status(404).json({ success: false, error: 'Card not found.' });

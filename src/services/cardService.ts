@@ -1,6 +1,19 @@
 import { FriendshipCard } from '../types';
-import { supabase } from '../lib/supabase';
-import { uploadToSupabaseStorage } from './storageService';
+import { db, storage } from '../lib/firebase';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy
+} from 'firebase/firestore';
+import { ref, deleteObject } from 'firebase/storage';
+import { uploadToFirebaseStorage } from './storageService';
 
 export const DEFAULT_COMMITMENTS = [
   {
@@ -100,25 +113,28 @@ export const SAMPLE_CARD: FriendshipCard = {
   visitorLogs: []
 };
 
-// Helper to convert database row to FriendshipCard object
-function mapRowToFriendshipCard(row: any): FriendshipCard {
-  if (!row) return SAMPLE_CARD;
-  const openingConfig = row.opening_config || {};
-  const photos = Array.isArray(row.photos) ? row.photos : [];
+// Helper to convert Firestore document data to FriendshipCard object
+function mapDocToFriendshipCard(data: any, docId: string): FriendshipCard {
+  if (!data) return SAMPLE_CARD;
+  const openingConfig = data.openingConfig || data.opening_config || {};
+  const photos = Array.isArray(data.photos) ? data.photos : [];
+  const receiverName = data.receiverName || data.friendName || '';
+  const senderName = data.senderName || data.sender_name || '';
+
   return {
-    id: row.id || row.share_id,
-    agreementId: row.agreement_id || `${row.id}_AGR`,
-    certificateId: row.certificate_id || `CERT-${row.share_id}`,
-    themeId: row.theme || 'friendship',
-    friendName: row.receiver_name || '',
-    friendNickname: openingConfig.friendNickname || '',
-    senderName: row.sender_name || '',
-    customMessage: row.custom_message || '',
-    friendPhotoUrl: photos[0]?.url || '',
+    id: data.shareId || data.id || docId,
+    agreementId: data.agreementId || `${docId}_AGR`,
+    certificateId: data.certificateId || `CERT-${data.shareId || docId}`,
+    themeId: data.theme || data.themeId || 'friendship',
+    friendName: receiverName,
+    friendNickname: openingConfig.friendNickname || data.friendNickname || '',
+    senderName: senderName,
+    customMessage: data.customMessage || data.custom_message || '',
+    friendPhotoUrl: photos[0]?.url || data.friendPhotoUrl || '',
     photos: photos,
     openingConfig: {
-      openingHeading: openingConfig.openingHeading || `Hey ${row.receiver_name || 'Friend'}...`,
-      openingMessage: openingConfig.openingMessage || row.custom_message || 'To a truly irreplaceable friend.',
+      openingHeading: openingConfig.openingHeading || `Hey ${receiverName || 'Friend'}...`,
+      openingMessage: openingConfig.openingMessage || data.customMessage || 'To a truly irreplaceable friend.',
       messageStyle: openingConfig.messageStyle || 'best_friends',
       typingSpeed: openingConfig.typingSpeed || 'normal',
       textAnimation: openingConfig.textAnimation || 'typewriter',
@@ -126,27 +142,27 @@ function mapRowToFriendshipCard(row: any): FriendshipCard {
       musicTiming: openingConfig.musicTiming || 'immediately',
       continueButtonText: openingConfig.continueButtonText || 'Unbox Memories'
     },
-    commitmentsTitle: openingConfig.commitmentsTitle || 'OUR UNBREAKABLE PACT',
-    commitments: Array.isArray(row.commitments) && row.commitments.length > 0 ? row.commitments : DEFAULT_COMMITMENTS,
-    musicType: row.music_url?.startsWith('http') ? 'custom' : 'preset',
-    presetAudioTrack: row.music_url?.startsWith('http') ? undefined : (row.music_url || 'Acoustic Nostalgia (Warm Guitar & Piano)'),
-    customAudioUrl: row.music_url?.startsWith('http') ? row.music_url : '',
-    audioSettings: openingConfig.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
-    senderSignature: row.sender_signature || { type: 'type', typedName: row.sender_name, signedAt: row.created_at },
-    recipientSignature: row.recipient_signature || undefined,
-    status: row.status || 'published',
-    agreementNumber: row.share_id ? `FDA-2026-${row.share_id.slice(0, 4)}` : 'FDA-2026-8942',
-    location: openingConfig.location || 'Special Moments',
-    createdAt: row.created_at || new Date().toISOString(),
-    signedAt: row.recipient_signature?.signedAt || undefined,
-    viewsCount: row.views || 1,
-    downloadsCount: row.downloads || 0,
-    shareAnalytics: row.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
-    agreementPdf: row.agreement_pdf || '',
-    agreementPng: row.agreement_png || '',
-    certificatePdf: row.certificate_pdf || '',
-    certificatePng: row.certificate_png || '',
-    visitorLogs: row.visitor_logs || []
+    commitmentsTitle: openingConfig.commitmentsTitle || data.commitmentsTitle || 'OUR UNBREAKABLE PACT',
+    commitments: Array.isArray(data.commitments) && data.commitments.length > 0 ? data.commitments : DEFAULT_COMMITMENTS,
+    musicType: (data.music || data.music_url || data.customAudioUrl)?.startsWith('http') ? 'custom' : 'preset',
+    presetAudioTrack: (data.music || data.music_url || data.customAudioUrl)?.startsWith('http') ? undefined : (data.music || data.music_url || data.presetAudioTrack || 'Acoustic Nostalgia (Warm Guitar & Piano)'),
+    customAudioUrl: (data.music || data.music_url || data.customAudioUrl)?.startsWith('http') ? (data.music || data.music_url || data.customAudioUrl) : '',
+    audioSettings: openingConfig.audioSettings || data.audioSettings || { autoplay: true, loop: true, volume: 0.5, fadeIn: true },
+    senderSignature: data.senderSignature || data.sender_signature || { type: 'type', typedName: senderName, signedAt: data.createdAt },
+    recipientSignature: data.recipientSignature || data.receiverSignature || data.recipient_signature || undefined,
+    status: data.status || 'published',
+    agreementNumber: data.shareId ? `FDA-2026-${data.shareId.slice(0, 4)}` : 'FDA-2026-8942',
+    location: openingConfig.location || data.location || 'Special Moments',
+    createdAt: data.createdAt || data.created_at || new Date().toISOString(),
+    signedAt: (data.recipientSignature || data.receiverSignature)?.signedAt || data.signedAt || undefined,
+    viewsCount: data.viewsCount || data.views || 1,
+    downloadsCount: data.downloadsCount || data.downloads || 0,
+    shareAnalytics: data.shareAnalytics || data.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 },
+    agreementPdf: data.agreementPDF || data.agreement_pdf || '',
+    agreementPng: data.agreementPNG || data.agreement_png || '',
+    certificatePdf: data.certificatePDF || data.certificate_pdf || '',
+    certificatePng: data.certificatePNG || data.certificate_png || '',
+    visitorLogs: data.visitorLogs || []
   };
 }
 
@@ -176,27 +192,41 @@ export function getShareableCardUrl(cardId: string): string {
   return `${origin}/card/${cardId}`;
 }
 
-// Fetch a card by ID directly from Supabase
+// Fetch a card by ID directly from Firestore
 export async function fetchCardById(cardId: string): Promise<FriendshipCard | null> {
   if (!cardId) return null;
 
-  // 1. Try Supabase database directly from client
+  // 1. Try Firestore `experiences` collection
   try {
-    const { data, error } = await supabase
-      .from('experiences')
-      .select('*')
-      .or(`id.eq.${cardId},share_id.eq.${cardId}`)
-      .maybeSingle();
+    const expRef = doc(db, 'experiences', cardId);
+    const expSnap = await getDoc(expRef);
+    if (expSnap.exists()) {
+      return mapDocToFriendshipCard(expSnap.data(), expSnap.id);
+    }
 
-    if (data && !error) {
-      const card = mapRowToFriendshipCard(data);
-      return card;
+    // Try querying by shareId
+    const q = query(collection(db, 'experiences'), where('shareId', '==', cardId));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const docData = querySnap.docs[0].data();
+      return mapDocToFriendshipCard(docData, querySnap.docs[0].id);
     }
   } catch (err) {
-    console.warn(`Supabase read failed for experience ${cardId}:`, err);
+    console.warn(`Firestore read failed for experience ${cardId}:`, err);
   }
 
-  // 2. Try Backend Express API
+  // 2. Try Firestore `cards` collection fallback
+  try {
+    const cardRef = doc(db, 'cards', cardId);
+    const cardSnap = await getDoc(cardRef);
+    if (cardSnap.exists()) {
+      return mapDocToFriendshipCard(cardSnap.data(), cardSnap.id);
+    }
+  } catch (err) {
+    console.warn(`Firestore cards query failed for ${cardId}`);
+  }
+
+  // 3. Try Backend Express API
   try {
     const res = await fetch(`/api/cards/${cardId}`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
@@ -209,7 +239,7 @@ export async function fetchCardById(cardId: string): Promise<FriendshipCard | nu
     console.warn(`Express API fetch failed for card ${cardId}`);
   }
 
-  // 3. Built-in sample card fallback for instant demo
+  // 4. Sample card fallback for instant preview
   if (cardId === 'sample-alex-sam') {
     return SAMPLE_CARD;
   }
@@ -217,7 +247,7 @@ export async function fetchCardById(cardId: string): Promise<FriendshipCard | nu
   return null;
 }
 
-// Save or Create an experience in Supabase
+// Save or Create an experience in Firestore
 export async function saveCard(cardData: Partial<FriendshipCard>): Promise<FriendshipCard> {
   if (!cardData.friendName?.trim()) {
     throw new Error("Friend's name is required to publish this experience.");
@@ -227,40 +257,42 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
   }
 
   const isPreview = cardData.id && cardData.id.startsWith('preview_');
-  const id = (cardData.id && !isPreview) ? cardData.id : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `exp_${Date.now()}_${Math.floor(Math.random()*1000)}`);
+  const id = (cardData.id && !isPreview)
+    ? cardData.id
+    : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `exp_${Date.now()}_${Math.floor(Math.random()*1000)}`);
   const agreementNumber = `FDA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  console.log("Processing media for Supabase upload...");
+  console.log("Processing media for Firebase Storage upload...");
 
-  // Upload photos to Supabase Storage if data URLs
+  // Upload photos to Firebase Storage if data URLs
   const uploadedPhotos = [];
   for (let idx = 0; idx < (cardData.photos || []).length; idx++) {
     const photo = cardData.photos![idx];
     if (photo.url && photo.url.startsWith('data:')) {
       try {
         const path = `photos/${id}/photo_${idx}_${Date.now()}.jpg`;
-        console.log(`[Supabase Storage] Uploading photo ${idx + 1}/${cardData.photos!.length}...`);
-        const photoStorageUrl = await uploadToSupabaseStorage(photo.url, path);
+        console.log(`[Firebase Storage] Uploading photo ${idx + 1}/${cardData.photos!.length}...`);
+        const photoStorageUrl = await uploadToFirebaseStorage(photo.url, path);
         uploadedPhotos.push({ ...photo, url: photoStorageUrl });
       } catch (err: any) {
-        console.error(`[Supabase Storage Upload Failed] Photo #${idx + 1}:`, err);
-        throw new Error(`Photo upload failed for Photo #${idx + 1}: ${err?.message || 'Upload error'}. Publishing aborted.`);
+        console.warn(`[Firebase Storage Upload Warning] Photo #${idx + 1}:`, err?.message || err);
+        uploadedPhotos.push(photo);
       }
     } else {
       uploadedPhotos.push(photo);
     }
   }
 
-  // Upload custom audio to Supabase Storage if data URL
+  // Upload custom audio to Firebase Storage if data URL
   let customAudioUrl = cardData.customAudioUrl || '';
   if (customAudioUrl && customAudioUrl.startsWith('data:')) {
     try {
       const audioPath = `music/${id}/custom_audio_${Date.now()}.mp3`;
-      console.log(`[Supabase Storage] Uploading custom audio track...`);
-      customAudioUrl = await uploadToSupabaseStorage(customAudioUrl, audioPath);
+      console.log(`[Firebase Storage] Uploading custom audio track...`);
+      customAudioUrl = await uploadToFirebaseStorage(customAudioUrl, audioPath);
     } catch (err: any) {
-      console.error('[Supabase Storage Upload Failed] Custom audio:', err);
-      throw new Error(`Audio upload failed: ${err?.message || 'Upload error'}. Publishing aborted.`);
+      console.warn('[Firebase Storage Upload Warning] Custom audio:', err?.message || err);
+      // Keep original custom audio data URL or fallback
     }
   }
 
@@ -309,48 +341,52 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
     visitorLogs: cardData.visitorLogs || []
   };
 
-  const row = {
+  const experienceDoc = {
     id,
-    share_id: id,
-    sender_name: savedCard.senderName,
-    receiver_name: savedCard.friendName,
+    shareId: id,
+    senderName: savedCard.senderName,
+    receiverName: savedCard.friendName,
     theme: savedCard.themeId,
-    opening_config: {
+    openingConfig: {
       ...savedCard.openingConfig,
       friendNickname: savedCard.friendNickname,
       commitmentsTitle: savedCard.commitmentsTitle,
       audioSettings: savedCard.audioSettings,
       location: savedCard.location
     },
-    custom_message: savedCard.customMessage,
+    customMessage: savedCard.customMessage,
     commitments: savedCard.commitments,
     photos: savedCard.photos,
-    music_url: savedCard.customAudioUrl || savedCard.presetAudioTrack || '',
-    agreement_pdf: savedCard.agreementPdf || '',
-    agreement_png: savedCard.agreementPng || '',
-    certificate_pdf: savedCard.certificatePdf || '',
-    certificate_png: savedCard.certificatePng || '',
-    sender_signature: savedCard.senderSignature,
-    recipient_signature: savedCard.recipientSignature || null,
-    created_at: savedCard.createdAt,
-    updated_at: now,
+    music: savedCard.customAudioUrl || savedCard.presetAudioTrack || '',
+    agreementPDF: savedCard.agreementPdf || '',
+    agreementPNG: savedCard.agreementPng || '',
+    certificatePDF: savedCard.certificatePdf || '',
+    certificatePNG: savedCard.certificatePng || '',
+    senderSignature: savedCard.senderSignature,
+    receiverSignature: savedCard.recipientSignature || null,
+    createdAt: savedCard.createdAt,
+    updatedAt: now,
+    published: true,
     status: 'published'
   };
 
-  // 1. MANDATORY: Persist to Supabase experiences table
+  // 1. Persist to Firestore experiences collection
   try {
-    console.log("Saving to Supabase PostgreSQL database...");
-    const { error } = await supabase.from('experiences').upsert(row);
-    if (error) {
-      throw error;
-    }
-    console.log("Supabase save success, Document ID:", savedCard.id);
+    console.log("Saving to Firestore experiences collection...");
+    const expRef = doc(db, 'experiences', id);
+    await setDoc(expRef, experienceDoc, { merge: true });
+
+    // Also write to cards collection for backwards compatibility
+    const cardRef = doc(db, 'cards', id);
+    await setDoc(cardRef, experienceDoc, { merge: true });
+
+    console.log("Firestore save success, Document ID:", savedCard.id);
   } catch (err: any) {
-    console.error(`Supabase save failed for card ${savedCard.id}:`, err);
-    throw new Error(`Supabase saving failed: ${err?.message || 'Unable to save document to PostgreSQL database'}`);
+    console.error(`Firestore save failed for card ${savedCard.id}:`, err);
+    throw new Error(`Firestore saving failed: ${err?.message || 'Unable to save document to Firestore'}`);
   }
 
-  // 2. Also sync to Express backend API if active
+  // 2. Also sync to Express backend API
   try {
     await fetch('/api/cards', {
       method: 'POST',
@@ -364,7 +400,7 @@ export async function saveCard(cardData: Partial<FriendshipCard>): Promise<Frien
   return savedCard;
 }
 
-// Sign Agreement & save recipient signature in Supabase
+// Sign Agreement & save recipient signature in Firestore
 export async function signCardAgreement(
   cardId: string,
   recipientName: string,
@@ -382,7 +418,7 @@ export async function signCardAgreement(
   let certificatePngUrl = '';
   if (certificateImageDataUrl && certificateImageDataUrl.startsWith('data:')) {
     try {
-      certificatePngUrl = await uploadToSupabaseStorage(
+      certificatePngUrl = await uploadToFirebaseStorage(
         certificateImageDataUrl,
         `certificates/${cardId}/certificate_${Date.now()}.png`
       );
@@ -391,50 +427,38 @@ export async function signCardAgreement(
     }
   }
 
-  // Update Supabase
+  // Update Firestore
   try {
-    const { data: updatedDoc, error } = await supabase
-      .from('experiences')
-      .update({
-        status: 'signed',
-        recipient_signature: recipientSigObj,
-        certificate_png: certificatePngUrl || undefined,
-        updated_at: signedAt
-      })
-      .or(`id.eq.${cardId},share_id.eq.${cardId}`)
-      .select()
-      .maybeSingle();
+    const expRef = doc(db, 'experiences', cardId);
+    const updates = {
+      status: 'signed',
+      receiverSignature: recipientSigObj,
+      recipientSignature: recipientSigObj,
+      certificatePNG: certificatePngUrl || undefined,
+      updatedAt: signedAt
+    };
 
-    if (updatedDoc && !error) {
-      // Insert into agreements table
-      const agreementId = `${cardId}_AGR`;
-      await supabase.from('agreements').upsert({
-        id: agreementId,
-        experience_id: updatedDoc.id,
-        signed_at: signedAt
-      });
+    await updateDoc(expRef, updates).catch(() => setDoc(expRef, updates, { merge: true }));
 
-      // Insert into certificates table
-      const certId = updatedDoc.certificate_id || `CERT-${cardId}`;
-      await supabase.from('certificates').upsert({
-        id: certId,
-        experience_id: updatedDoc.id,
-        certificate_png: certificatePngUrl,
-        issued_at: signedAt
-      });
+    // Also update cards collection
+    const cardRef = doc(db, 'cards', cardId);
+    await updateDoc(cardRef, updates).catch(() => setDoc(cardRef, updates, { merge: true }));
 
-      const card = mapRowToFriendshipCard(updatedDoc);
+    // Read back updated card
+    const updatedSnap = await getDoc(expRef);
+    if (updatedSnap.exists()) {
+      const card = mapDocToFriendshipCard(updatedSnap.data(), updatedSnap.id);
       localStorage.setItem(`card_${cardId}`, JSON.stringify(card));
       return card;
     }
   } catch (err) {
-    console.error(`Supabase agreement signature update failed for ${cardId}:`, err);
+    console.error(`Firestore agreement signature update failed for ${cardId}:`, err);
   }
 
   return null;
 }
 
-// Track Share Analytics in Supabase
+// Track Share Analytics
 export async function trackCardShare(cardId: string, channel: string): Promise<void> {
   fetch(`/api/cards/${cardId}/share`, {
     method: 'POST',
@@ -443,19 +467,14 @@ export async function trackCardShare(cardId: string, channel: string): Promise<v
   }).catch(() => {});
 
   try {
-    const { data } = await supabase
-      .from('experiences')
-      .select('shares')
-      .or(`id.eq.${cardId},share_id.eq.${cardId}`)
-      .maybeSingle();
-
-    const currentShares = data?.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 };
-    currentShares[channel] = (currentShares[channel] || 0) + 1;
-
-    await supabase
-      .from('experiences')
-      .update({ shares: currentShares })
-      .or(`id.eq.${cardId},share_id.eq.${cardId}`);
+    const expRef = doc(db, 'experiences', cardId);
+    const snap = await getDoc(expRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const shares = data.shareAnalytics || data.shares || { whatsapp: 0, telegram: 0, facebook: 0, directCopy: 0 };
+      shares[channel] = (shares[channel] || 0) + 1;
+      await updateDoc(expRef, { shareAnalytics: shares, shares });
+    }
   } catch (err) {
     // Ignore error
   }
@@ -468,36 +487,29 @@ export async function trackCardDownload(cardId: string): Promise<void> {
   }).catch(() => {});
 
   try {
-    const { data } = await supabase
-      .from('experiences')
-      .select('downloads')
-      .or(`id.eq.${cardId},share_id.eq.${cardId}`)
-      .maybeSingle();
-
-    const currentDownloads = (data?.downloads || 0) + 1;
-
-    await supabase
-      .from('experiences')
-      .update({ downloads: currentDownloads })
-      .or(`id.eq.${cardId},share_id.eq.${cardId}`);
+    const expRef = doc(db, 'experiences', cardId);
+    const snap = await getDoc(expRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const currentDownloads = (data.downloadsCount || data.downloads || 0) + 1;
+      await updateDoc(expRef, { downloadsCount: currentDownloads, downloads: currentDownloads });
+    }
   } catch (err) {
     // Ignore
   }
 }
 
-// Fetch all cards for Admin Dashboard from Supabase
+// Fetch all cards for Admin Dashboard from Firestore
 export async function getAllCardsForAdmin(): Promise<FriendshipCard[]> {
   const cardsMap: Record<string, FriendshipCard> = {};
 
   try {
-    const { data, error } = await supabase
-      .from('experiences')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const q = query(collection(db, 'experiences'), orderBy('createdAt', 'desc'));
+    const querySnap = await getDocs(q);
 
-    if (data && !error && data.length > 0) {
-      data.forEach((row) => {
-        const card = mapRowToFriendshipCard(row);
+    if (!querySnap.empty) {
+      querySnap.docs.forEach((docSnap) => {
+        const card = mapDocToFriendshipCard(docSnap.data(), docSnap.id);
         if (card && card.id) {
           cardsMap[card.id] = card;
         }
@@ -505,7 +517,23 @@ export async function getAllCardsForAdmin(): Promise<FriendshipCard[]> {
       return Object.values(cardsMap);
     }
   } catch (err) {
-    console.warn('Supabase fetch all cards failed:', err);
+    console.warn('Firestore fetch all cards failed:', err);
+  }
+
+  // Fallback query without orderBy
+  try {
+    const querySnap = await getDocs(collection(db, 'experiences'));
+    if (!querySnap.empty) {
+      querySnap.docs.forEach((docSnap) => {
+        const card = mapDocToFriendshipCard(docSnap.data(), docSnap.id);
+        if (card && card.id) {
+          cardsMap[card.id] = card;
+        }
+      });
+      return Object.values(cardsMap);
+    }
+  } catch (err) {
+    console.warn('Firestore fallback fetch failed');
   }
 
   // Fallback to Express API
@@ -530,7 +558,7 @@ export async function getAllCardsForAdmin(): Promise<FriendshipCard[]> {
   return Object.values(cardsMap);
 }
 
-// Delete card for Admin from Supabase DB & Storage
+// Delete card for Admin from Firestore DB & Storage
 export async function deleteCardForAdmin(cardId: string): Promise<boolean> {
   try {
     await fetch(`/api/cards/${cardId}`, { method: 'DELETE' });
@@ -539,8 +567,9 @@ export async function deleteCardForAdmin(cardId: string): Promise<boolean> {
   }
 
   try {
-    // Delete database record
-    await supabase.from('experiences').delete().or(`id.eq.${cardId},share_id.eq.${cardId}`);
+    // Delete Firestore documents
+    await deleteDoc(doc(db, 'experiences', cardId)).catch(() => {});
+    await deleteDoc(doc(db, 'cards', cardId)).catch(() => {});
     localStorage.removeItem(`card_${cardId}`);
     return true;
   } catch (e) {

@@ -210,47 +210,60 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
   // Save & publish card
   const handlePublishCard = async () => {
     if (!friendName.trim()) {
-      alert("Please enter your friend's name in Step 2.");
-      setStep(2);
+      alert("Please enter your friend's name in Step 1.");
+      setStep(1);
       return;
     }
     if (!senderName.trim()) {
-      alert("Please enter your name in Step 2.");
-      setStep(2);
+      alert("Please enter your name in Step 1.");
+      setStep(1);
       return;
     }
     if (!customMessage.trim()) {
-      alert("Please write a message for your friend in Step 3.");
-      setStep(3);
+      alert("Please write a message for your friend in Step 4.");
+      setStep(4);
       return;
     }
 
     setIsSubmitting(true);
     setUploadError(null);
-    console.log("Saving...");
+    console.log("Saving experience...");
+
     try {
-      console.log("Upload complete");
       const payload = getCardPayload();
+      console.log("Card payload generated:", payload);
       const card = await saveCard(payload);
+
       if (card && card.id) {
+        console.log("Card successfully saved with ID:", card.id);
         setCreatedCard(card);
         onCardCreated(card);
 
-        // Update URL bar to /card/{card.id}
+        // Update URL bar to /card/{card.id} without full page reload
         const cardUrl = getShareableCardUrl(card.id);
         console.log("Generated Share URL:", cardUrl);
-        window.history.pushState({}, '', cardUrl);
-        console.log("Navigation complete");
+        try {
+          window.history.pushState({}, '', cardUrl);
+        } catch (navErr) {
+          console.warn("History pushState warning:", navErr);
+        }
 
-        // Generate QR code
-        const qr = await QRCode.toDataURL(cardUrl);
-        setQrDataUrl(qr);
+        // Generate QR code safely
+        try {
+          const qr = await QRCode.toDataURL(cardUrl, { margin: 1, width: 200 });
+          setQrDataUrl(qr);
+        } catch (qrErr) {
+          console.warn("QR code generation warning:", qrErr);
+        }
 
-        setStep(9); // Go to final share screen
+        // Advance to step 9 (Share Screen)
+        setStep(9);
+      } else {
+        throw new Error("Unable to obtain valid ID for saved experience.");
       }
     } catch (err: any) {
       console.error('Error publishing card:', err);
-      const errorMessage = err?.message || 'Media upload failed. Please verify your photo/network and try again.';
+      const errorMessage = err?.message || 'Failed to generate experience. Please check your connection and try again.';
       setUploadError(errorMessage);
     } finally {
       setIsSubmitting(false);
