@@ -44,7 +44,7 @@ export const InteractiveExperience: React.FC<InteractiveExperienceProps> = ({
         fadeIn: card.audioSettings.fadeIn
       });
     } else {
-      soundEngine.playPresetSynth(theme.synthFrequency, card.audioSettings.volume);
+      soundEngine.playPresetSynth(theme.synthFrequency, card.audioSettings.volume, theme.defaultAudioUrl);
     }
     setIsPlayingAudio(true);
   };
@@ -128,7 +128,7 @@ export const InteractiveExperience: React.FC<InteractiveExperienceProps> = ({
               if (card.musicType === 'custom' && card.customAudioUrl) {
                 soundEngine.playCustomAudio(card.customAudioUrl);
               } else {
-                soundEngine.playPresetSynth(theme.synthFrequency);
+                soundEngine.playPresetSynth(theme.synthFrequency, card.audioSettings?.volume || 0.5, theme.defaultAudioUrl);
               }
               setIsPlayingAudio(true);
             }

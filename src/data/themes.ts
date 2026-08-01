@@ -12,7 +12,8 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     textColor: 'text-amber-100',
     fontFamily: 'sans-serif',
     particles: 'hearts',
-    defaultAudioTitle: 'Acoustic Nostalgia (Warm Guitar & Piano)',
+    defaultAudioTitle: 'Unforgettable Moments (Default Theme Track)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 440,
     emoji: '💛',
     clauses: [
@@ -34,6 +35,7 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     fontFamily: 'sans-serif',
     particles: 'confetti',
     defaultAudioTitle: 'Uplifting Festive Beats (Fun & Upbeat)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 523.25,
     emoji: '🎉',
     clauses: [
@@ -55,6 +57,7 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     fontFamily: 'serif',
     particles: 'hearts',
     defaultAudioTitle: 'Cinematic Sunset Romance (Strings & Piano)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 349.23,
     emoji: '💖',
     clauses: [
@@ -76,6 +79,7 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     fontFamily: 'serif',
     particles: 'sparkles',
     defaultAudioTitle: 'Orchestral Celebration (Elegant Strings)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 392.00,
     emoji: '🥂',
     clauses: [
@@ -97,6 +101,7 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     fontFamily: 'sans-serif',
     particles: 'diyas',
     defaultAudioTitle: 'Luminous Indian Classical Fusion (Sitar & Flute)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 493.88,
     emoji: '🪔',
     clauses: [
@@ -118,6 +123,7 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     fontFamily: 'sans-serif',
     particles: 'snow',
     defaultAudioTitle: 'Cozy Winter Piano (Gentle Bells)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 587.33,
     emoji: '🎄',
     clauses: [
@@ -139,6 +145,7 @@ export const THEMES: Record<ThemeId, ThemeConfig> = {
     fontFamily: 'sans-serif',
     particles: 'stars',
     defaultAudioTitle: 'Cinematic New Horizon (Ambient Synth)',
+    defaultAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
     synthFrequency: 659.25,
     emoji: '🎆',
     clauses: [

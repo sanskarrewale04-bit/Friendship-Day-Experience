@@ -19,6 +19,7 @@ export interface ThemeConfig {
   fontFamily: string;
   particles: 'hearts' | 'sparkles' | 'confetti' | 'stars' | 'diyas' | 'snow';
   defaultAudioTitle: string;
+  defaultAudioUrl?: string;
   synthFrequency: number;
   emoji: string;
   clauses: string[];

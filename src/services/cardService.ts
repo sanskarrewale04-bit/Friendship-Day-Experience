@@ -85,8 +85,9 @@ export const SAMPLE_CARD: FriendshipCard = {
   ],
   commitmentsTitle: 'OUR UNBREAKABLE PACT',
   commitments: DEFAULT_COMMITMENTS,
-  musicType: 'preset',
-  presetAudioTrack: 'Acoustic Nostalgia (Warm Guitar & Piano)',
+  musicType: 'custom',
+  presetAudioTrack: 'Unforgettable Moments',
+  customAudioUrl: 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
   audioSettings: {
     autoplay: true,
     loop: true,

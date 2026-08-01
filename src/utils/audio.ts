@@ -21,7 +21,15 @@ class SoundEngine {
     }
   }
 
-  public playPresetSynth(frequency: number = 440, volume: number = 0.3) {
+  public playPresetSynth(frequency: number = 440, volume: number = 0.3, audioUrl?: string) {
+    if (audioUrl) {
+      try {
+        this.playCustomAudio(audioUrl, { loop: true, volume, fadeIn: true });
+        return;
+      } catch (e) {
+        console.warn('Fallback to synth due to audio error:', e);
+      }
+    }
     this.stopAll();
     this.initCtx();
     if (!this.ctx || !this.masterGain) return;

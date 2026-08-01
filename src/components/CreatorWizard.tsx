@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { THEMES, PRESET_MESSAGES } from '../data/themes';
 import { ThemeId, FriendshipCard, SignatureData, PhotoItem, CommitmentItem, OpeningConfig } from '../types';
 import { saveCard, getShareableCardUrl, trackCardShare } from '../services/cardService';
+import { soundEngine } from '../utils/audio';
 import { SignatureCanvas } from './SignatureCanvas';
 import { EmojiPickerModal } from './EmojiPickerModal';
 import { MultiPhotoUploader } from './MultiPhotoUploader';
@@ -114,12 +115,27 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
   const [musicType, setMusicType] = useState<'preset' | 'custom'>('preset');
   const [customAudioUrl, setCustomAudioUrl] = useState<string>('');
   const [isUploadingAudio, setIsUploadingAudio] = useState<boolean>(false);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState<boolean>(false);
   const [audioSettings, setAudioSettings] = useState({
     autoplay: true,
     loop: true,
     volume: 0.6,
     fadeIn: true
   });
+
+  const handleTogglePreview = () => {
+    if (isPreviewPlaying) {
+      soundEngine.stopAll();
+      setIsPreviewPlaying(false);
+    } else {
+      if (musicType === 'custom' && customAudioUrl) {
+        soundEngine.playCustomAudio(customAudioUrl, { volume: audioSettings.volume });
+      } else {
+        soundEngine.playPresetSynth(themeConfig.synthFrequency, audioSettings.volume, themeConfig.defaultAudioUrl);
+      }
+      setIsPreviewPlaying(true);
+    }
+  };
 
   // Signature State
   const [senderSignature, setSenderSignature] = useState<SignatureData | null>(null);
@@ -187,7 +203,7 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
       commitments: commitments,
       musicType,
       presetAudioTrack: themeConfig.defaultAudioTitle,
-      customAudioUrl,
+      customAudioUrl: customAudioUrl || themeConfig.defaultAudioUrl || 'https://www.image2url.com/r2/default/audio/1785615027221-9eef290d-761d-4638-a9f3-d56121b26d93.mp3',
       audioSettings,
       senderSignature: senderSignature || {
         type: 'type',
@@ -612,11 +628,18 @@ export const CreatorWizard: React.FC<CreatorWizardProps> = ({
             <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl mb-6 flex items-center justify-between">
               <div>
                 <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">
-                  Selected Preset
+                  Default Theme Track
                 </span>
                 <span className="text-sm font-bold text-slate-100">{themeConfig.defaultAudioTitle}</span>
               </div>
-              <Music className="w-6 h-6 text-amber-400 animate-pulse" />
+              <button
+                type="button"
+                onClick={handleTogglePreview}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-semibold transition-all"
+              >
+                {isPreviewPlaying ? <Volume2 className="w-4 h-4 text-emerald-400 animate-pulse" /> : <Play className="w-4 h-4 text-amber-400" />}
+                {isPreviewPlaying ? 'Pause' : 'Preview'}
+              </button>
             </div>
           ) : (
             <div className="mb-6">
